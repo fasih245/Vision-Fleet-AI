@@ -4,7 +4,7 @@ import { ChatInterface } from "@/components/chat/chat-interface";
 const Index = () => {
   return (
     <Layout>
-      <div className="h-[calc(100vh-3.5rem)]">
+      <div className="h-full flex flex-col">
         <ChatInterface />
       </div>
     </Layout>

@@ -12,8 +12,8 @@ export function Layout({ children, className }: LayoutProps) {
     <SidebarProvider>
       <div className="flex min-h-screen w-full bg-background">
         <AppSidebar />
-        <main className={cn("flex-1 transition-smooth", className)}>
-          <header className="h-14 flex items-center justify-between border-b bg-card/50 backdrop-blur-sm px-4">
+        <div className="flex flex-col flex-1 min-w-0">
+          <header className="h-14 flex items-center justify-between border-b bg-card/50 backdrop-blur-sm px-4 sticky top-0 z-40">
             <div className="flex items-center gap-3">
               <SidebarTrigger className="hover:bg-accent" />
               <div className="flex items-center gap-2">
@@ -24,8 +24,10 @@ export function Layout({ children, className }: LayoutProps) {
               </div>
             </div>
           </header>
-          {children}
-        </main>
+          <main className={cn("flex-1 transition-smooth overflow-hidden", className)}>
+            {children}
+          </main>
+        </div>
       </div>
     </SidebarProvider>
   );
