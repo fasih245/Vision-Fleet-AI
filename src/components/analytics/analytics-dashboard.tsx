@@ -1,45 +1,123 @@
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Download, TrendingUp, FileText, MessageSquare, Users, Clock } from "lucide-react";
-
-const queryData = [
-  { month: "Jan", queries: 45, documents: 12 },
-  { month: "Feb", queries: 67, documents: 18 },
-  { month: "Mar", queries: 89, documents: 25 },
-  { month: "Apr", queries: 123, documents: 31 },
-  { month: "May", queries: 156, documents: 28 },
-  { month: "Jun", queries: 178, documents: 35 },
-];
-
-const documentUsage = [
-  { name: "Financial Reports", queries: 45, color: "#0ea5e9" },
-  { name: "Market Analysis", queries: 32, color: "#06b6d4" },
-  { name: "Technical Specs", queries: 28, color: "#8b5cf6" },
-  { name: "Research Papers", queries: 19, color: "#10b981" },
-  { name: "Other", queries: 15, color: "#f59e0b" },
-];
-
-const topQueries = [
-  { query: "What was the revenue growth in Q4?", count: 23, trend: "+15%" },
-  { query: "Market trends analysis summary", count: 18, trend: "+8%" },
-  { query: "Technical specifications overview", count: 14, trend: "+22%" },
-  { query: "Competitive analysis insights", count: 11, trend: "+5%" },
-  { query: "Financial projections for next quarter", count: 9, trend: "+12%" },
-];
+import { Download, TrendingUp, FileText, MessageSquare, Clock, RefreshCw } from "lucide-react";
+import { dbOperations } from "@/lib/supabase";
 
 export function AnalyticsDashboard() {
+  const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState({
+    totalMessages: 0,
+    totalDocuments: 0,
+    avgResponseTime: 0,
+    totalConversations: 0,
+  });
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [recentQueries, setRecentQueries] = useState<any[]>([]);
+
+  useEffect(() => {
+    loadAnalytics();
+  }, []);
+
+  const loadAnalytics = async () => {
+    setIsLoading(true);
+    try {
+      // Load documents
+      const docs = await dbOperations.getDocuments();
+      setDocuments(docs);
+
+      // Load conversations
+      const conversations = await dbOperations.getConversations();
+
+      // Load all messages and calculate stats
+      let totalMessages = 0;
+      let totalResponseTime = 0;
+      let responseCount = 0;
+      const allMessages: any[] = [];
+
+      for (const conv of conversations) {
+        const messages = await dbOperations.getMessages(conv.id);
+        totalMessages += messages.length;
+        
+        messages.forEach(msg => {
+          if (msg.response_time_ms) {
+            totalResponseTime += msg.response_time_ms;
+            responseCount++;
+          }
+          allMessages.push({
+            ...msg,
+            conversation_title: conv.title
+          });
+        });
+      }
+
+      // Calculate average response time
+      const avgResponseTime = responseCount > 0 
+        ? (totalResponseTime / responseCount / 1000).toFixed(1) 
+        : 0;
+
+      // Get most recent queries
+      const sortedMessages = allMessages
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 5);
+
+      setRecentQueries(sortedMessages);
+
+      setStats({
+        totalMessages,
+        totalDocuments: docs.length,
+        avgResponseTime: parseFloat(avgResponseTime.toString()),
+        totalConversations: conversations.length,
+      });
+    } catch (error) {
+      console.error("Error loading analytics:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Group documents by type
+  const documentsByType = documents.reduce((acc: any, doc) => {
+    const type = doc.file_type || 'unknown';
+    const simplified = type.includes('pdf') ? 'PDF' 
+      : type.includes('word') || type.includes('document') ? 'Word Documents'
+      : type.includes('text') ? 'Text Files'
+      : type.includes('csv') ? 'CSV Files'
+      : 'Other';
+    
+    acc[simplified] = (acc[simplified] || 0) + 1;
+    return acc;
+  }, {});
+
+  const documentUsage = Object.entries(documentsByType).map(([name, count], index) => ({
+    name,
+    count: count as number,
+    color: ['#0ea5e9', '#06b6d4', '#8b5cf6', '#10b981', '#f59e0b'][index % 5]
+  }));
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <RefreshCw className="w-8 h-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
   return (
-    <div className="p-6 space-y-6 bg-background">
+    <div className="p-6 space-y-6 bg-background max-h-screen overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Analytics Dashboard</h1>
           <p className="text-muted-foreground mt-1">Track your document usage and query insights</p>
         </div>
-        <Button className="bg-gradient-primary hover:bg-primary-hover text-white shadow-sm">
-          <Download className="w-4 h-4 mr-2" />
-          Export Report
+        <Button 
+          className="bg-gradient-primary hover:bg-primary-hover text-white shadow-sm"
+          onClick={loadAnalytics}
+        >
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Refresh Data
         </Button>
       </div>
 
@@ -47,42 +125,39 @@ export function AnalyticsDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-gradient-card shadow-card">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Queries</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Messages</CardTitle>
             <MessageSquare className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">1,234</div>
-            <p className="text-xs text-success flex items-center mt-1">
-              <TrendingUp className="w-3 h-3 mr-1" />
-              +12% from last month
+            <div className="text-2xl font-bold text-foreground">{stats.totalMessages}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Across all conversations
             </p>
           </CardContent>
         </Card>
 
         <Card className="bg-gradient-card shadow-card">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Documents Processed</CardTitle>
+            <CardTitle className="text-sm font-medium">Documents Uploaded</CardTitle>
             <FileText className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">87</div>
-            <p className="text-xs text-success flex items-center mt-1">
-              <TrendingUp className="w-3 h-3 mr-1" />
-              +8% from last month
+            <div className="text-2xl font-bold text-foreground">{stats.totalDocuments}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Total processed documents
             </p>
           </CardContent>
         </Card>
 
         <Card className="bg-gradient-card shadow-card">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Users</CardTitle>
-            <Users className="h-4 w-4 text-primary" />
+            <CardTitle className="text-sm font-medium">Conversations</CardTitle>
+            <MessageSquare className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">23</div>
-            <p className="text-xs text-success flex items-center mt-1">
-              <TrendingUp className="w-3 h-3 mr-1" />
-              +4% from last month
+            <div className="text-2xl font-bold text-foreground">{stats.totalConversations}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Total chat sessions
             </p>
           </CardContent>
         </Card>
@@ -93,10 +168,10 @@ export function AnalyticsDashboard() {
             <Clock className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">2.3s</div>
+            <div className="text-2xl font-bold text-foreground">{stats.avgResponseTime}s</div>
             <p className="text-xs text-success flex items-center mt-1">
               <TrendingUp className="w-3 h-3 mr-1" />
-              -15% faster
+              RAG + Groq powered
             </p>
           </CardContent>
         </Card>
@@ -104,44 +179,44 @@ export function AnalyticsDashboard() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Query Trends */}
+        {/* Recent Documents */}
         <Card className="bg-gradient-card shadow-card">
           <CardHeader>
-            <CardTitle className="text-foreground">Query Trends</CardTitle>
-            <CardDescription>Monthly queries and document uploads over time</CardDescription>
+            <CardTitle className="text-foreground">Recent Documents</CardTitle>
+            <CardDescription>Latest uploaded documents</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {queryData.map((item, index) => (
+              {documents.slice(0, 6).map((doc, index) => (
                 <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
                   <div className="flex items-center space-x-3">
                     <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
-                      <span className="text-sm font-medium text-primary">{item.month}</span>
+                      <FileText className="w-4 h-4 text-primary" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium">{item.queries} queries</p>
-                      <p className="text-xs text-muted-foreground">{item.documents} documents</p>
+                      <p className="text-sm font-medium truncate max-w-[200px]">{doc.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {doc.chunk_count || 0} chunks • {new Date(doc.created_at).toLocaleDateString()}
+                      </p>
                     </div>
                   </div>
-                  <div className="flex space-x-2">
-                    <div className="w-16 h-2 bg-primary/20 rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-primary rounded-full" 
-                        style={{ width: `${(item.queries / 200) * 100}%` }}
-                      />
-                    </div>
-                  </div>
+                  <Badge variant={doc.is_processed ? "default" : "secondary"}>
+                    {doc.is_processed ? "Processed" : "Processing"}
+                  </Badge>
                 </div>
               ))}
+              {documents.length === 0 && (
+                <p className="text-center text-muted-foreground py-8">No documents uploaded yet</p>
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Document Usage */}
+        {/* Document Types */}
         <Card className="bg-gradient-card shadow-card">
           <CardHeader>
-            <CardTitle className="text-foreground">Document Usage</CardTitle>
-            <CardDescription>Query distribution by document type</CardDescription>
+            <CardTitle className="text-foreground">Document Types</CardTitle>
+            <CardDescription>Distribution by file type</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
@@ -154,43 +229,51 @@ export function AnalyticsDashboard() {
                     />
                     <div>
                       <p className="text-sm font-medium">{item.name}</p>
-                      <p className="text-xs text-muted-foreground">{item.queries} queries</p>
+                      <p className="text-xs text-muted-foreground">{item.count} files</p>
                     </div>
                   </div>
                   <Badge variant="secondary">
-                    {((item.queries / documentUsage.reduce((sum, doc) => sum + doc.queries, 0)) * 100).toFixed(0)}%
+                    {((item.count / stats.totalDocuments) * 100).toFixed(0)}%
                   </Badge>
                 </div>
               ))}
+              {documentUsage.length === 0 && (
+                <p className="text-center text-muted-foreground py-8">No documents to analyze</p>
+              )}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Top Queries Table */}
+      {/* Recent Queries */}
       <Card className="bg-gradient-card shadow-card">
         <CardHeader>
-          <CardTitle className="text-foreground">Top Queries</CardTitle>
-          <CardDescription>Most frequently asked questions this month</CardDescription>
+          <CardTitle className="text-foreground">Recent Queries</CardTitle>
+          <CardDescription>Latest questions asked</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {topQueries.map((item, index) => (
+            {recentQueries.map((item, index) => (
               <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted/70 transition-colors">
-                <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                <div className="flex items-center space-x-3 flex-1 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                     <span className="text-sm font-medium text-primary">{index + 1}</span>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{item.query}</p>
-                    <p className="text-xs text-muted-foreground">{item.count} queries</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground truncate">{item.user_message}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(item.created_at).toLocaleString()} • {item.response_time_ms ? `${(item.response_time_ms / 1000).toFixed(1)}s` : 'N/A'}
+                    </p>
                   </div>
                 </div>
-                <Badge variant="secondary" className="text-success">
-                  {item.trend}
+                <Badge variant="secondary" className="ml-2">
+                  {item.model_used?.includes('llama') ? 'Llama' : 'GPT'}
                 </Badge>
               </div>
             ))}
+            {recentQueries.length === 0 && (
+              <p className="text-center text-muted-foreground py-8">No queries yet. Start a conversation!</p>
+            )}
           </div>
         </CardContent>
       </Card>

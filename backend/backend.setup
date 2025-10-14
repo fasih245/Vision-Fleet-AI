@@ -1,0 +1,17 @@
+# Navigate to backend
+cd backend
+
+# Create conda environment
+conda create -n rag-backend python=3.10 -y
+conda activate rag-backend
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Create .env file
+echo "GROQ_API_KEY=your_groq_key_here" > .env
+echo "SUPABASE_URL=your_supabase_url" >> .env
+echo "SUPABASE_SERVICE_KEY=your_service_key" >> .env
+
+# Run backend
+python main.py

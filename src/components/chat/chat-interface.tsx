@@ -1,242 +1,302 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Copy, ThumbsUp, ThumbsDown, RefreshCw } from "lucide-react";
+import { Send, Bot, User, Copy, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, Brain } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { sendChatMessage } from "@/lib/api";
+import { dbOperations } from "@/lib/supabase";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
 interface Message {
   id: string;
-  type: "user" | "assistant";
+  role: "user" | "assistant";
   content: string;
   timestamp: Date;
-  sources?: Array<{ document: string; page: number; excerpt: string }>;
-  isTyping?: boolean;
+  sources?: any[];
 }
 
-const mockSources = [
-  { document: "Financial Report Q4.pdf", page: 23, excerpt: "Revenue increased by 15% compared to Q3..." },
-  { document: "Market Analysis.docx", page: 7, excerpt: "Market trends show strong growth in the analytics sector..." }
-];
+interface ChatInterfaceProps {
+  conversationId?: string;
+  documentsCount?: number;
+}
 
-export function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      type: "assistant",
-      content: "Hello! I'm your VisionFleet Analytics assistant. I can help you analyze your uploaded documents and answer questions based on their content. What would you like to know?",
-      timestamp: new Date(),
-    }
-  ]);
-  const [inputValue, setInputValue] = useState("");
+export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterfaceProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isRAGEnabled, setIsRAGEnabled] = useState(true);
+  const [isTogglingRAG, setIsTogglingRAG] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  // Load messages when conversation changes
+  useEffect(() => {
+    if (conversationId) {
+      loadMessages();
+    }
+  }, [conversationId]);
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const loadMessages = async () => {
+    if (!conversationId) return;
+    
+    try {
+      const loadedMessages = await dbOperations.getMessages(conversationId);
+      setMessages(loadedMessages.map(msg => ({
+        id: msg.id,
+        role: msg.user_message ? "user" : "assistant",
+        content: msg.user_message || msg.assistant_response || "",
+        timestamp: new Date(msg.created_at),
+        sources: msg.sources,
+      })));
+    } catch (error) {
+      console.error("Error loading messages:", error);
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const simulateTypingResponse = (content: string, sources?: typeof mockSources) => {
-    const messageId = Date.now().toString();
-    
-    // Add typing indicator
-    setMessages(prev => [...prev, {
-      id: messageId,
-      type: "assistant",
-      content: "",
-      timestamp: new Date(),
-      isTyping: true
-    }]);
-
-    // Simulate typing effect
-    let currentContent = "";
-    const words = content.split(" ");
-    let wordIndex = 0;
-
-    const typingInterval = setInterval(() => {
-      if (wordIndex < words.length) {
-        currentContent += (wordIndex > 0 ? " " : "") + words[wordIndex];
-        setMessages(prev => prev.map(msg => 
-          msg.id === messageId 
-            ? { ...msg, content: currentContent, isTyping: true }
-            : msg
-        ));
-        wordIndex++;
-      } else {
-        clearInterval(typingInterval);
-        setMessages(prev => prev.map(msg => 
-          msg.id === messageId 
-            ? { ...msg, content: currentContent, isTyping: false, sources }
-            : msg
-        ));
-        setIsLoading(false);
-      }
-    }, 100);
+  const handleToggleRAG = () => {
+    setIsTogglingRAG(true);
+    setTimeout(() => {
+      setIsRAGEnabled(!isRAGEnabled);
+      setIsTogglingRAG(false);
+      toast({
+        title: isRAGEnabled ? "Conventional Chatbot Activated" : "RAG Mode Activated",
+        description: isRAGEnabled 
+          ? "Now using general LLM without document search" 
+          : "Now searching your documents for context",
+      });
+    }, 300);
   };
 
-  const handleSendMessage = async () => {
-    if (!inputValue.trim()) return;
+  const handleSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      type: "user",
-      content: inputValue,
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setInputValue("");
+    const userMessage = input.trim();
+    setInput("");
     setIsLoading(true);
 
-    // Simulate AI response
-    setTimeout(() => {
-      const responses = [
-        "Based on your uploaded documents, I found several relevant insights. The financial report shows a 15% revenue increase, while market analysis indicates strong growth trends in the analytics sector.",
-        "I've analyzed your documents and found key information across multiple sources. The data suggests significant opportunities for growth in the current market conditions."
-      ];
-      
-      const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-      simulateTypingResponse(randomResponse, mockSources);
-    }, 1000);
-  };
+    // Add user message to UI
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: userMessage,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMsg]);
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
+    try {
+      // Send to backend
+      const response = await sendChatMessage(userMessage, isRAGEnabled);
+
+      // Add assistant response
+      const assistantMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: response.answer,
+        timestamp: new Date(),
+        sources: response.sources || [],
+      };
+      setMessages(prev => [...prev, assistantMsg]);
+
+      // Save to database if we have a conversation
+      if (conversationId) {
+        await dbOperations.saveMessage(
+         conversationId,
+         userMessage,
+         response.answer,
+         response.sources
+);
+      }
+    } catch (error: any) {
+      console.error("Chat error:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to send message",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+      inputRef.current?.focus();
     }
   };
 
-  const copyMessage = (content: string) => {
-    navigator.clipboard.writeText(content);
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend(e);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
     toast({
-      title: "Copied to clipboard",
-      description: "Message content has been copied to your clipboard.",
+      title: "Copied!",
+      description: "Message copied to clipboard",
     });
   };
 
   return (
     <div className="flex flex-col h-full bg-background">
+      {/* RAG Toggle Header */}
+      <div className={`flex-shrink-0 border-b p-4 transition-all duration-300 ${
+        isRAGEnabled 
+          ? 'bg-gradient-to-r from-primary/10 to-accent/10' 
+          : 'bg-muted/50'
+      }`}>
+        <div className="flex items-center justify-between max-w-4xl mx-auto">
+          <div className="flex items-center space-x-3">
+            <div className={`transition-transform duration-300 ${isTogglingRAG ? 'scale-110 rotate-180' : ''}`}>
+              {isRAGEnabled ? (
+                <Brain className="w-5 h-5 text-primary" />
+              ) : (
+                <Sparkles className="w-5 h-5 text-muted-foreground" />
+              )}
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold">
+                {isRAGEnabled ? "RAG Mode Active" : "Conventional Chatbot"}
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                {isRAGEnabled 
+                  ? "Searching your documents for context" 
+                  : "General conversation without document search"}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Label htmlFor="rag-toggle" className="text-sm cursor-pointer">
+              {isRAGEnabled ? "RAG" : "LLM"}
+            </Label>
+            <Switch
+              id="rag-toggle"
+              checked={isRAGEnabled}
+              onCheckedChange={handleToggleRAG}
+              disabled={isTogglingRAG}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${message.type === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div className={`flex max-w-[80%] ${message.type === "user" ? "flex-row-reverse" : "flex-row"} items-start space-x-3`}>
-              {/* Avatar */}
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                message.type === "user" 
-                  ? "bg-chat-user text-chat-user-foreground ml-3" 
-                  : "bg-chat-assistant text-chat-assistant-foreround mr-3"
-              }`}>
-                {message.type === "user" ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-              </div>
-
-              {/* Message Content */}
-              <div className="space-y-2">
-                <Card className={`p-4 shadow-chat ${
-                  message.type === "user" 
-                    ? "bg-chat-user text-chat-user-foreground" 
-                    : "bg-chat-assistant text-chat-assistant-foreground"
-                }`}>
-                  <div className="flex items-start justify-between">
-                    <p className="text-sm leading-relaxed">
-                      {message.content}
-                      {message.isTyping && (
-                        <span className="inline-block w-2 h-4 bg-current opacity-75 animate-pulse ml-1" />
-                      )}
-                    </p>
-                    
-                    {message.type === "assistant" && !message.isTyping && (
-                      <div className="flex items-center space-x-1 ml-3 flex-shrink-0">
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="h-6 w-6 p-0 hover:bg-background/20"
-                          onClick={() => copyMessage(message.content)}
-                        >
-                          <Copy className="w-3 h-3" />
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-background/20">
-                          <ThumbsUp className="w-3 h-3" />
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-background/20">
-                          <ThumbsDown className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </Card>
-
-                {/* Sources */}
-                {message.sources && !message.isTyping && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground font-medium">Sources:</p>
-                    {message.sources.map((source, index) => (
-                      <Card key={index} className="p-3 bg-muted/50 border-l-4 border-l-accent">
-                        <div className="flex items-center justify-between mb-1">
-                          <Badge variant="secondary" className="text-xs">
-                            {source.document}
-                          </Badge>
-                          <span className="text-xs text-muted-foreground">Page {source.page}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground italic">{source.excerpt}</p>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-
-                {/* Timestamp */}
-                <p className="text-xs text-muted-foreground">
-                  {message.timestamp.toLocaleTimeString()}
+        {messages.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-center">
+            <div className="space-y-4">
+              <Bot className="w-16 h-16 mx-auto text-muted-foreground" />
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Start a conversation</h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Ask questions about your documents or have a general conversation
                 </p>
               </div>
             </div>
           </div>
-        ))}
+        ) : (
+          messages.map((message) => (
+            <Card key={message.id} className={`p-4 ${
+              message.role === "user" 
+                ? "bg-primary/5 ml-auto max-w-[80%]" 
+                : "bg-muted/50 mr-auto max-w-[80%]"
+            }`}>
+              <div className="flex items-start gap-3">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  message.role === "user" 
+                    ? "bg-primary text-primary-foreground" 
+                    : "bg-muted"
+                }`}>
+                  {message.role === "user" ? (
+                    <User className="w-4 h-4" />
+                  ) : (
+                    <Bot className="w-4 h-4" />
+                  )}
+                </div>
+                <div className="flex-1 space-y-2">
+                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                    {message.content}
+                  </div>
+                  {message.sources && message.sources.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {message.sources.map((source, idx) => (
+                        <Badge key={idx} variant="outline" className="text-xs">
+                          📄 {source.source}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 mt-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyToClipboard(message.content)}
+                      className="h-6 px-2"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </Button>
+                    <span className="text-xs text-muted-foreground">
+                      {message.timestamp.toLocaleTimeString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))
+        )}
         <div ref={messagesEndRef} />
       </div>
 
       {/* Input Area */}
-      <div className="border-t bg-card/50 backdrop-blur-sm p-4">
-        <div className="flex items-center space-x-3">
-          <div className="flex-1 relative">
+      <div className="flex-shrink-0 border-t bg-card/50 backdrop-blur-sm p-4 z-10">
+        <form onSubmit={handleSend} className="space-y-2">
+          <div className="flex gap-2">
             <Input
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder="Ask a question about your documents..."
-              className="pr-12 bg-background border-border focus:border-primary"
               disabled={isLoading}
+              className="flex-1 bg-background pointer-events-auto"
             />
-            {isLoading && (
-              <RefreshCw className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 animate-spin text-muted-foreground" />
-            )}
+            <Button 
+              type="submit" 
+              disabled={isLoading || !input.trim()}
+              className="bg-gradient-primary hover:bg-primary-hover text-white pointer-events-auto"
+            >
+              {isLoading ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+            </Button>
           </div>
-          <Button 
-            onClick={handleSendMessage} 
-            disabled={!inputValue.trim() || isLoading}
-            className="bg-gradient-primary hover:bg-primary-hover text-white shadow-sm"
-          >
-            <Send className="w-4 h-4" />
-          </Button>
-        </div>
-        
-        <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
-          <span>Press Enter to send, Shift+Enter for new line</span>
-          <div className="flex items-center space-x-2">
-            <Badge variant="secondary" className="text-xs">3 documents loaded</Badge>
-            <Badge variant="outline" className="text-xs">RAG Active</Badge>
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>Press Enter to send, Shift+Enter for new line</span>
+            <div className="flex items-center space-x-2">
+              <Badge variant="secondary" className="text-xs">
+                {documentsCount} document{documentsCount !== 1 ? "s" : ""} loaded
+              </Badge>
+              <Badge 
+                variant={isRAGEnabled ? "default" : "outline"} 
+                className="text-xs"
+              >
+                {isRAGEnabled ? "RAG Active" : "LLM Only"}
+              </Badge>
+            </div>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

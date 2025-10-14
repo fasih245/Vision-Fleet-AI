@@ -1,0 +1,13 @@
+# Navigate to project root
+cd vision-fleet-ai-5aad3fcb
+
+# Install dependencies
+npm install
+
+# Create .env file
+echo "VITE_API_URL=http://localhost:8000/api" > .env
+echo "VITE_SUPABASE_URL=your_supabase_url" >> .env
+echo "VITE_SUPABASE_ANON_KEY=your_anon_key" >> .env
+
+# Run frontend
+npm run dev
