@@ -1,73 +1,72 @@
-# Welcome to your Lovable project
+# VisionFleet AI - Intelligent Document Analysis Platform
 
-## Project info
+<div align="center">
 
-**URL**: https://lovable.dev/projects/e181fdae-fbd8-4b5d-8a82-1b8b452a06a8
+![VisionFleet AI](https://img.shields.io/badge/VisionFleet-AI-blue?style=for-the-badge)
+![Python](https://img.shields.io/badge/Python-3.10-green?style=for-the-badge&logo=python)
+![React](https://img.shields.io/badge/React-18.2-blue?style=for-the-badge&logo=react)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.109-teal?style=for-the-badge&logo=fastapi)
+![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
 
-## How can I edit this code?
+*AI-powered document analysis using Retrieval-Augmented Generation (RAG)*
 
-There are several ways of editing your application.
+[Features](#features) • [Architecture](#architecture) • [Installation](#installation) • [Usage](#usage) • [Tech Stack](#tech-stack)
 
-**Use Lovable**
+</div>
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/e181fdae-fbd8-4b5d-8a82-1b8b452a06a8) and start prompting.
+---
 
-Changes made via Lovable will be committed automatically to this repo.
+## 📋 Table of Contents
 
-**Use your preferred IDE**
+- [Overview](#overview)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Workflow](#workflow)
+- [API Documentation](#api-documentation)
+- [Contributing](#contributing)
+- [License](#license)
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+---
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+## 🌟 Overview
 
-Follow these steps:
+**VisionFleet AI** is an advanced document analysis platform that leverages **Retrieval-Augmented Generation (RAG)** to enable intelligent conversations with your documents. Upload PDFs, DOCX, TXT, or CSV files, and ask questions in natural language to extract insights instantly.
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### Key Capabilities:
+- 📄 **Multi-format document processing** (PDF, DOCX, TXT, CSV)
+- 🔍 **Semantic search** using FAISS vector database
+- 🤖 **AI-powered responses** via Groq LLM (Llama 3.3)
+- 🔐 **User authentication** and document isolation
+- 💬 **Dual chat modes**: RAG-enabled and conventional LLM
+- 📊 **Source attribution** for transparent responses
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+---
 
-# Step 3: Install the necessary dependencies.
-npm i
+## ✨ Features
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+### 🚀 Core Features
+- **Document Upload & Processing**: Supports PDF, DOCX, TXT, and CSV files
+- **Intelligent Chunking**: Automatically splits documents into semantic chunks
+- **Vector Embeddings**: Uses Sentence Transformers for semantic understanding
+- **FAISS Vector Store**: Lightning-fast similarity search
+- **RAG Pipeline**: Combines document context with LLM generation
+- **User Isolation**: Each user's documents are private and secure
+- **Conversation History**: Persistent chat sessions stored in Supabase
 
-**Edit a file directly in GitHub**
+### 🎯 Advanced Features
+- **Hybrid Search Mode**: FAISS + Supabase for redundancy
+- **RAG Toggle**: Switch between RAG and conventional LLM on-the-fly
+- **Source Citations**: Every answer links back to source documents
+- **Real-time Processing**: Instant document indexing and retrieval
+- **Responsive Design**: Works seamlessly on desktop and mobile
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+---
 
-**Use GitHub Codespaces**
+## 🏗️ Architecture
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/e181fdae-fbd8-4b5d-8a82-1b8b452a06a8) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+### High-Level Architecture
