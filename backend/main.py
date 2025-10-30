@@ -19,7 +19,7 @@ app = FastAPI(
 # CORS Configuration - MUST BE BEFORE ROUTES
 # ============================================================================
 app.add_middleware(
-    CORSMiddleware,
+    CORSMiddleware, 
     allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
