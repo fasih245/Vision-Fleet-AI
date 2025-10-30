@@ -114,11 +114,11 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
       // Save to database if we have a conversation
       if (conversationId) {
         await dbOperations.saveMessage(
-         conversationId,
-         userMessage,
-         response.answer,
-         response.sources
-);
+          conversationId,
+          userMessage,
+          response.answer,
+          response.sources
+        );
       }
     } catch (error: any) {
       console.error("Chat error:", error);
@@ -145,6 +145,52 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
     toast({
       title: "Copied!",
       description: "Message copied to clipboard",
+    });
+  };
+
+  // Format message content with proper line breaks and structure
+  const formatMessageContent = (content: string) => {
+    // Split by newlines and filter empty lines
+    const lines = content.split('\n').filter(line => line.trim());
+    
+    return lines.map((line, index) => {
+      const trimmedLine = line.trim();
+      
+      // Check if line is a header (starts with #, ##, etc or is in all caps)
+      const isHeader = /^#{1,6}\s/.test(trimmedLine) || 
+                       (trimmedLine.length < 100 && trimmedLine === trimmedLine.toUpperCase() && trimmedLine.length > 3);
+      
+      // Check if line is a list item
+      const isListItem = /^[-*•]\s/.test(trimmedLine) || /^\d+\.\s/.test(trimmedLine);
+      
+      // Check if line is a code block
+      const isCodeBlock = trimmedLine.startsWith('```');
+      
+      if (isHeader) {
+        return (
+          <h3 key={index} className="font-semibold text-base mt-4 mb-2 first:mt-0">
+            {trimmedLine.replace(/^#{1,6}\s/, '')}
+          </h3>
+        );
+      } else if (isListItem) {
+        return (
+          <li key={index} className="ml-4 mb-1">
+            {trimmedLine.replace(/^[-*•]\s/, '').replace(/^\d+\.\s/, '')}
+          </li>
+        );
+      } else if (isCodeBlock) {
+        return (
+          <pre key={index} className="bg-muted p-2 rounded my-2 overflow-x-auto">
+            <code>{trimmedLine.replace(/```/g, '')}</code>
+          </pre>
+        );
+      } else {
+        return (
+          <p key={index} className="mb-3 leading-relaxed">
+            {trimmedLine}
+          </p>
+        );
+      }
     });
   };
 
@@ -208,8 +254,8 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
           messages.map((message) => (
             <Card key={message.id} className={`p-4 ${
               message.role === "user" 
-                ? "bg-primary/5 ml-auto max-w-[80%]" 
-                : "bg-muted/50 mr-auto max-w-[80%]"
+                ? "bg-primary/5 ml-auto max-w-[85%]" 
+                : "bg-muted/50 mr-auto max-w-[85%]"
             }`}>
               <div className="flex items-start gap-3">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
@@ -223,12 +269,16 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
                     <Bot className="w-4 h-4" />
                   )}
                 </div>
-                <div className="flex-1 space-y-2">
-                  <div className="prose prose-sm dark:prose-invert max-w-none">
-                    {message.content}
+                <div className="flex-1 space-y-2 min-w-0">
+                  {/* Formatted Message Content */}
+                  <div className="text-sm text-foreground break-words">
+                    {formatMessageContent(message.content)}
                   </div>
+                  
+                  {/* Sources */}
                   {message.sources && message.sources.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-2">
+                    <div className="flex flex-wrap gap-2 pt-2 border-t border-border/50">
+                      <span className="text-xs text-muted-foreground font-medium">Sources:</span>
                       {message.sources.map((source, idx) => (
                         <Badge key={idx} variant="outline" className="text-xs">
                           📄 {source.source}
@@ -236,17 +286,23 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
                       ))}
                     </div>
                   )}
-                  <div className="flex items-center gap-2 mt-2">
+                  
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 pt-2">
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => copyToClipboard(message.content)}
-                      className="h-6 px-2"
+                      className="h-7 px-2 text-muted-foreground hover:text-foreground"
                     >
-                      <Copy className="w-3 h-3" />
+                      <Copy className="w-3 h-3 mr-1" />
+                      <span className="text-xs">Copy</span>
                     </Button>
                     <span className="text-xs text-muted-foreground">
-                      {message.timestamp.toLocaleTimeString()}
+                      {message.timestamp.toLocaleTimeString([], { 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      })}
                     </span>
                   </div>
                 </div>
