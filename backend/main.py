@@ -14,13 +14,18 @@ app = FastAPI(
     description="AI-powered document analysis with RAG",
     version="1.0.0"
 )
-
 # ============================================================================
 # CORS Configuration - MUST BE BEFORE ROUTES
 # ============================================================================
 app.add_middleware(
     CORSMiddleware, 
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://visionfleetai.netlify.app",  # Add your Netlify domain
+        "https://unmodern-coadunate-jacque.ngrok-free.dev",  # Your ngrok domain
+        "*"  # Allow all (good for development, remove in production)
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
