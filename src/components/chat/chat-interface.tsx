@@ -50,69 +50,69 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
   }, [messages]);
 
   const loadMessages = async () => {
-    if (!conversationId) return;
+  if (!conversationId) return;
+  
+  setIsLoadingHistory(true);
+  
+  try {
+    console.log(`📥 Loading messages for conversation: ${conversationId}`);
     
-    setIsLoadingHistory(true);
+    // Load from API
+    const response = await loadConversationMessages(conversationId);
     
-    try {
-      console.log(`📥 Loading messages for conversation: ${conversationId}`);
+    if (response.messages && response.messages.length > 0) {
+      // Transform API messages to UI format
+      const loadedMessages: Message[] = [];
       
-      // Load from API
-      const response = await loadConversationMessages(conversationId);
-      
-      if (response.messages && response.messages.length > 0) {
-        // Transform API messages to UI format
-        const loadedMessages: Message[] = [];
+      response.messages.forEach((msg: any) => {
+        // Add user message
+        if (msg.user_message) {
+          loadedMessages.push({
+            id: `${msg.id}-user`,
+            role: "user",
+            content: msg.user_message,
+            timestamp: new Date(msg.created_at),
+          });
+        }
         
-        response.messages.forEach((msg: any) => {
-          // Add user message
-          if (msg.user_message) {
-            loadedMessages.push({
-              id: `${msg.id}-user`,
-              role: "user",
-              content: msg.user_message,
-              timestamp: new Date(msg.created_at),
-            });
-          }
-          
-          // Add assistant response
-          if (msg.assistant_response) {
-            loadedMessages.push({
-              id: `${msg.id}-assistant`,
-              role: "assistant",
-              content: msg.assistant_response,
-              timestamp: new Date(msg.created_at),
-              sources: msg.sources || [],
-            });
-          }
-        });
-        
-        setMessages(loadedMessages);
-        console.log(`✅ Loaded ${loadedMessages.length} messages`);
-        
-        toast({
-          title: "Chat History Loaded",
-          description: `${response.count} messages loaded`,
-        });
-      } else {
-        console.log("📝 No previous messages found");
-        setMessages([]);
-      }
-      
-    } catch (error: any) {
-      console.error("❌ Error loading messages:", error);
-      toast({
-        title: "Error Loading History",
-        description: error.message || "Failed to load chat history",
-        variant: "destructive",
+        // Add assistant response
+        if (msg.assistant_response) {
+          loadedMessages.push({
+            id: `${msg.id}-assistant`,
+            role: "assistant",
+            content: msg.assistant_response,
+            timestamp: new Date(msg.created_at),
+            sources: msg.sources || [],
+          });
+        }
       });
-      // Don't fail silently - set empty messages
+      
+      setMessages(loadedMessages);
+      console.log(`✅ Loaded ${loadedMessages.length} messages`);
+    } else {
+      // No messages - this is NORMAL for new conversations
+      console.log("📝 No previous messages (new conversation)");
       setMessages([]);
-    } finally {
-      setIsLoadingHistory(false);
+      // Don't show error toast for empty conversations
     }
-  };
-
+    
+  } catch (error: any) {
+    console.error("❌ Error loading messages:", error);
+    
+    // Only show error if it's NOT a 404 (conversation not found is ok)
+    if (error.response?.status !== 404) {
+      toast({
+        title: "Note",
+        description: "Starting fresh conversation",
+      });
+    }
+    
+    // Set empty messages (don't fail)
+    setMessages([]);
+  } finally {
+    setIsLoadingHistory(false);
+  }
+};
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };

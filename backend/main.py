@@ -14,17 +14,28 @@ app = FastAPI(
     description="AI-powered document analysis with RAG",
     version="1.0.0"
 )
+
 # ============================================================================
 # CORS Configuration - MUST BE BEFORE ROUTES
 # ============================================================================
 app.add_middleware(
     CORSMiddleware, 
     allow_origins=[
+        # Local development
         "http://localhost:3000",
         "http://localhost:5173",
-        "https://visionfleetai.netlify.app",  # Add your Netlify domain
-        "https://unmodern-coadunate-jacque.ngrok-free.dev",  # Your ngrok domain
-        "*"  # Allow all (good for development, remove in production)
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        
+        # Production - Add your actual Netlify URL
+        "https://visionfleetai.netlify.app",
+        "https://*.netlify.app",  # All Netlify preview deployments
+        
+        # Ngrok
+        "https://unmodern-coadunate-jacque.ngrok-free.dev",
+        
+        # Allow all for development (remove in production if needed)
+        "*"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -32,6 +43,7 @@ app.add_middleware(
     expose_headers=["*"],
     max_age=3600,
 )
+
 # ============================================================================
 # Include API Routes
 # ============================================================================
@@ -48,7 +60,8 @@ async def root():
         "message": "VisionFleet RAG Backend API is running",
         "status": "online",
         "version": "1.0.0",
-        "docs": "/docs"
+        "docs": "/docs",
+        "health": "/health"
     }
 
 @app.get("/health")
@@ -61,7 +74,8 @@ async def health_check():
         "status": "healthy",
         "groq_configured": bool(groq_key),
         "supabase_configured": bool(supabase_url),
-        "environment": "production" if os.getenv("PRODUCTION") else "development"
+        "environment": "production" if os.getenv("PRODUCTION") else "development",
+        "cors_enabled": True
     }
 
 # ============================================================================
@@ -70,28 +84,33 @@ async def health_check():
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup"""
-    print("=" * 50)
-    print("🚀 RAG Backend Starting...")
-    print("=" * 50)
+    print("\n" + "=" * 60)
+    print("🚀 VisionFleet RAG Backend Starting...")
+    print("=" * 60)
     print(f"📁 Working Directory: {os.getcwd()}")
     
     # Check GROQ API Key
     groq_key = os.getenv("GROQ_API_KEY")
     if groq_key:
-        print(f"🔑 API Key Status: ✓ Configured")
+        print(f"🔑 GROQ API Key: ✓ Configured")
     else:
-        print(f"⚠️  API Key Status: ✗ Not configured")
+        print(f"⚠️  GROQ API Key: ✗ Not configured")
     
     # Check Supabase
     supabase_url = os.getenv("SUPABASE_URL")
     if supabase_url:
-        print(f"🗄️  Database Status: ✓ Configured")
+        print(f"🗄️  Supabase: ✓ Configured")
+        print(f"   URL: {supabase_url}")
     else:
-        print(f"⚠️  Database Status: ✗ Not configured")
+        print(f"⚠️  Supabase: ✗ Not configured")
     
-    print(f"📚 API Docs: http://localhost:8000/docs")
+    # Check CORS
+    print(f"🌐 CORS: ✓ Enabled for all origins")
+    
+    print(f"\n📚 API Documentation: http://localhost:8000/docs")
     print(f"🏥 Health Check: http://localhost:8000/health")
-    print("=" * 50)
+    print(f"🌍 Root: http://localhost:8000/")
+    print("=" * 60 + "\n")
 
 # ============================================================================
 # Shutdown Event
@@ -99,14 +118,18 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
-    print("\n👋 Shutting down RAG Backend...")
+    print("\n" + "=" * 60)
+    print("👋 Shutting down VisionFleet RAG Backend...")
     print("✓ Cleanup complete")
+    print("=" * 60 + "\n")
 
 # ============================================================================
 # Main Entry Point
 # ============================================================================
 if __name__ == "__main__":
-    print("🔧 Starting server with uvicorn...")
+    print("\n🔧 Starting server with uvicorn...")
+    print("Press CTRL+C to stop\n")
+    
     uvicorn.run(
         "main:app",
         host="0.0.0.0",

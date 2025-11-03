@@ -45,11 +45,17 @@ export const loadConversationMessages = async (conversationId: string) => {
     
     return response.data;
   } catch (error: any) {
+    // If 404, conversation has no messages yet - that's OK
+    if (error.response?.status === 404) {
+      console.log('No messages yet for this conversation');
+      return { messages: [], count: 0, conversation_id: conversationId };
+    }
+    
     console.error('Error loading messages:', error);
-    throw new Error(error.response?.data?.detail || 'Failed to load messages');
+    // Return empty instead of throwing
+    return { messages: [], count: 0, conversation_id: conversationId };
   }
 };
-
 export const uploadDocument = async (file: File) => {
   const formData = new FormData();
   formData.append('file', file);
