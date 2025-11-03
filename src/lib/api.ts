@@ -1,18 +1,59 @@
 import axios from 'axios';
+import { supabase } from './supabase';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
+// Create axios instance
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
+// Add auth token to all requests
+api.interceptors.request.use(async (config) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  
+  if (session?.access_token) {
+    config.headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  
+  return config;
+});
+
+export const sendChatMessage = async (question: string, use_rag: boolean = true) => {
+  const response = await api.post('/chat', {
+    question,
+    use_rag,
+  });
+  return response.data;
+};
+
+export const loadConversationMessages = async (conversationId: string) => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    const response = await axios.get(
+      `${API_URL}/conversations/${conversationId}/messages`,
+      {
+        headers: {
+          Authorization: session?.access_token ? `Bearer ${session.access_token}` : undefined,
+        },
+      }
+    );
+    
+    return response.data;
+  } catch (error: any) {
+    console.error('Error loading messages:', error);
+    throw new Error(error.response?.data?.detail || 'Failed to load messages');
+  }
+};
+
 export const uploadDocument = async (file: File) => {
   const formData = new FormData();
   formData.append('file', file);
-  
+
   const response = await api.post('/upload', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
@@ -21,17 +62,3 @@ export const uploadDocument = async (file: File) => {
   
   return response.data;
 };
-
-export const sendChatMessage = async (question: string, useRag: boolean = true) => {
-  const response = await api.post('/chat', { 
-    question, 
-    use_rag: useRag 
-  });
-  return response.data;
-};
-export const clearDocuments = async () => {
-  const response = await api.delete('/clear');
-  return response.data;
-};
-
-export default api;

@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Copy, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, Brain } from "lucide-react";
+import { Send, Bot, User, Copy, RefreshCw, Sparkles, Brain } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { sendChatMessage } from "@/lib/api";
+import { sendChatMessage, loadConversationMessages } from "@/lib/api";
 import { dbOperations } from "@/lib/supabase";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,7 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isRAGEnabled, setIsRAGEnabled] = useState(true);
   const [isTogglingRAG, setIsTogglingRAG] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -37,6 +38,9 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
   useEffect(() => {
     if (conversationId) {
       loadMessages();
+    } else {
+      // Clear messages if no conversation selected
+      setMessages([]);
     }
   }, [conversationId]);
 
@@ -48,17 +52,64 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
   const loadMessages = async () => {
     if (!conversationId) return;
     
+    setIsLoadingHistory(true);
+    
     try {
-      const loadedMessages = await dbOperations.getMessages(conversationId);
-      setMessages(loadedMessages.map(msg => ({
-        id: msg.id,
-        role: msg.user_message ? "user" : "assistant",
-        content: msg.user_message || msg.assistant_response || "",
-        timestamp: new Date(msg.created_at),
-        sources: msg.sources,
-      })));
-    } catch (error) {
-      console.error("Error loading messages:", error);
+      console.log(`📥 Loading messages for conversation: ${conversationId}`);
+      
+      // Load from API
+      const response = await loadConversationMessages(conversationId);
+      
+      if (response.messages && response.messages.length > 0) {
+        // Transform API messages to UI format
+        const loadedMessages: Message[] = [];
+        
+        response.messages.forEach((msg: any) => {
+          // Add user message
+          if (msg.user_message) {
+            loadedMessages.push({
+              id: `${msg.id}-user`,
+              role: "user",
+              content: msg.user_message,
+              timestamp: new Date(msg.created_at),
+            });
+          }
+          
+          // Add assistant response
+          if (msg.assistant_response) {
+            loadedMessages.push({
+              id: `${msg.id}-assistant`,
+              role: "assistant",
+              content: msg.assistant_response,
+              timestamp: new Date(msg.created_at),
+              sources: msg.sources || [],
+            });
+          }
+        });
+        
+        setMessages(loadedMessages);
+        console.log(`✅ Loaded ${loadedMessages.length} messages`);
+        
+        toast({
+          title: "Chat History Loaded",
+          description: `${response.count} messages loaded`,
+        });
+      } else {
+        console.log("📝 No previous messages found");
+        setMessages([]);
+      }
+      
+    } catch (error: any) {
+      console.error("❌ Error loading messages:", error);
+      toast({
+        title: "Error Loading History",
+        description: error.message || "Failed to load chat history",
+        variant: "destructive",
+      });
+      // Don't fail silently - set empty messages
+      setMessages([]);
+    } finally {
+      setIsLoadingHistory(false);
     }
   };
 
@@ -88,7 +139,7 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
     setInput("");
     setIsLoading(true);
 
-    // Add user message to UI
+    // Add user message to UI immediately
     const userMsg: Message = {
       id: Date.now().toString(),
       role: "user",
@@ -113,12 +164,18 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
 
       // Save to database if we have a conversation
       if (conversationId) {
-        await dbOperations.saveMessage(
-          conversationId,
-          userMessage,
-          response.answer,
-          response.sources
-        );
+        try {
+          await dbOperations.saveMessage(
+            conversationId,
+            userMessage,
+            response.answer,
+            response.sources
+          );
+          console.log("✅ Message saved to database");
+        } catch (dbError) {
+          console.error("⚠️ Failed to save to database:", dbError);
+          // Don't show error to user - message is still in UI
+        }
       }
     } catch (error: any) {
       console.error("Chat error:", error);
@@ -150,20 +207,16 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
 
   // Format message content with proper line breaks and structure
   const formatMessageContent = (content: string) => {
-    // Split by newlines and filter empty lines
     const lines = content.split('\n').filter(line => line.trim());
     
     return lines.map((line, index) => {
       const trimmedLine = line.trim();
       
-      // Check if line is a header (starts with #, ##, etc or is in all caps)
       const isHeader = /^#{1,6}\s/.test(trimmedLine) || 
                        (trimmedLine.length < 100 && trimmedLine === trimmedLine.toUpperCase() && trimmedLine.length > 3);
       
-      // Check if line is a list item
       const isListItem = /^[-*•]\s/.test(trimmedLine) || /^\d+\.\s/.test(trimmedLine);
       
-      // Check if line is a code block
       const isCodeBlock = trimmedLine.startsWith('```');
       
       if (isHeader) {
@@ -238,14 +291,23 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
 
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 ? (
+        {isLoadingHistory ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center space-y-2">
+              <RefreshCw className="w-8 h-8 mx-auto animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Loading chat history...</p>
+            </div>
+          </div>
+        ) : messages.length === 0 ? (
           <div className="flex items-center justify-center h-full text-center">
             <div className="space-y-4">
               <Bot className="w-16 h-16 mx-auto text-muted-foreground" />
               <div>
                 <h3 className="text-lg font-semibold text-foreground">Start a conversation</h3>
                 <p className="text-sm text-muted-foreground mt-2">
-                  Ask questions about your documents or have a general conversation
+                  {conversationId 
+                    ? "No messages yet. Ask your first question!" 
+                    : "Select or create a conversation to begin"}
                 </p>
               </div>
             </div>
@@ -322,13 +384,13 @@ export function ChatInterface({ conversationId, documentsCount = 0 }: ChatInterf
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask a question about your documents..."
-              disabled={isLoading}
+              placeholder={conversationId ? "Ask a question about your documents..." : "Select a conversation first..."}
+              disabled={isLoading || !conversationId}
               className="flex-1 bg-background pointer-events-auto"
             />
             <Button 
               type="submit" 
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || !input.trim() || !conversationId}
               className="bg-gradient-primary hover:bg-primary-hover text-white pointer-events-auto"
             >
               {isLoading ? (
