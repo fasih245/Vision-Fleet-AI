@@ -118,10 +118,10 @@ async def chat(
         if request.use_rag:
             print("🔍 Using RAG mode...")
             
-            # Search for relevant documents
+            # Search for relevant documents - GET MORE RESULTS
             search_results = vector_store.search(
                 request.question,
-                k=4,
+                k=20,  # ← INCREASED from 4 to 20
                 user_id=user_id
             )
             
@@ -130,55 +130,83 @@ async def chat(
                 answer = "I couldn't find any relevant information in your documents. Please make sure you've uploaded documents or try rephrasing your question."
                 sources = []
             else:
-                print(f"✓ Found {len(search_results)} relevant chunks")
+                print(f"✓ Found {len(search_results)} total chunks")
                 
-                # Build context from search results
-                context = "\n\n".join([
-                    f"Document: {doc.metadata.get('source', 'Unknown')}\n{doc.page_content}"
-                    for doc, score in search_results
-                ])
+                # FILTER BY RELEVANCE - Only keep very relevant chunks
+                # Lower distance = more similar/relevant
+                relevant_results = [
+                    (doc, score) for doc, score in search_results
+                    if score < 1.8  # ← Only keep chunks with distance < 1.8
+                ]
                 
-                # Create prompt with context
-                prompt = f"""You are a helpful AI assistant analyzing documents. Use the following context to answer the user's question. If the answer is not in the context, say so clearly.
+                print(f"✓ Filtered to {len(relevant_results)} relevant chunks (distance < 1.8)")
+                
+                if len(relevant_results) == 0:
+                    print("⚠️  No highly relevant chunks found after filtering")
+                    answer = "I found some documents, but none seem directly relevant to your question. Could you rephrase or ask about something else?"
+                    sources = []
+                else:
+                    # Use top 4-6 most relevant chunks
+                    final_results = relevant_results[:6]
+                    
+                    print(f"✓ Using top {len(final_results)} chunks:")
+                    for i, (doc, score) in enumerate(final_results):
+                        source_name = doc.metadata.get('source', 'unknown')
+                        print(f"   {i+1}. {source_name} (distance: {score:.4f})")
+                    
+                    # Build context from search results
+                    context = "\n\n".join([
+                        f"[Document: {doc.metadata.get('source', 'Unknown')}]\n{doc.page_content}"
+                        for doc, score in final_results
+                    ])
+                    
+                    # Create prompt with context
+                    prompt = f"""You are a helpful AI assistant analyzing documents. Use the following context to answer the user's question accurately and specifically.
 
 Context from documents:
 {context}
 
 User question: {request.question}
 
-Answer based on the context above:"""
-                
-                # Generate response with Groq
-                print("🤖 Generating response with context...")
-                completion = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[
+Instructions:
+- Answer based ONLY on the information in the context above
+- Be specific and cite which document(s) you're referencing
+- If the context doesn't contain enough information, say so clearly
+- Don't make up information not present in the context
+
+Answer:"""
+                    
+                    # Generate response with Groq
+                    print("🤖 Generating response with context...")
+                    completion = groq_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": "You are a helpful assistant that answers questions based on provided documents. Always cite which document you're referencing and be specific."
+                            },
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ],
+                        temperature=0.3,  # ← Lower temperature for more factual responses
+                        max_tokens=1024,
+                    )
+                    
+                    answer = completion.choices[0].message.content
+                    
+                    # Extract sources
+                    sources = [
                         {
-                            "role": "system",
-                            "content": "You are a helpful assistant that answers questions based on provided documents. Always cite which document you're referencing."
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
+                            "source": doc.metadata.get("source", "Unknown"),
+                            "chunk_index": doc.metadata.get("chunk_index", 0),
+                            "relevance_score": float(score)
                         }
-                    ],
-                    temperature=0.7,
-                    max_tokens=1024,
-                )
-                
-                answer = completion.choices[0].message.content
-                
-                # Extract sources
-                sources = [
-                    {
-                        "source": doc.metadata.get("source", "Unknown"),
-                        "chunk_index": doc.metadata.get("chunk_index", 0),
-                        "relevance_score": float(score)
-                    }
-                    for doc, score in search_results
-                ]
-                
-                print(f"✓ Generated response with {len(sources)} sources")
+                        for doc, score in final_results
+                    ]
+                    
+                    print(f"✓ Generated response with {len(sources)} sources")
         
         else:
             print("💬 Using LLM-only mode...")
