@@ -27,6 +27,14 @@ __pycache__/
 Thumbs.db
 ```
 
+
+
+.env
+.env.local
+.env.production
+.env.development
+backend/.env
+
 ---
 
 ## **What Happens After Railway Deployment:**
