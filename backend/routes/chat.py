@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Header, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import os
+import traceback
 from groq import Groq
 from services.dependencies import get_vector_store
 
@@ -129,6 +130,10 @@ async def chat(
     - If use_rag=True: Search documents and use context
     - If use_rag=False: Direct LLM conversation
     """
+    # Initialize defaults to prevent UnboundLocalError
+    answer = None
+    sources = []
+    
     try:
         print(f"\n📨 Received chat request: {request.question[:50]}...")
         print(f"🔧 RAG enabled: {request.use_rag}")
@@ -252,6 +257,7 @@ Answer:"""
             )
             
             answer = completion.choices[0].message.content
+            sources = []  # No sources in LLM-only mode
 
         # Save to Supabase
         if request.conversation_id:
@@ -292,6 +298,10 @@ Answer:"""
         else:
             print("⚠️  No conversation_id provided, message not saved to history")
 
+        # Defensive check: ensure answer exists
+        if answer is None:
+            raise ValueError("Failed to generate answer")
+        
         return ChatResponse(
             answer=answer,
             sources=sources,
@@ -300,9 +310,11 @@ Answer:"""
 
     except ValueError as ve:
         print(f"❌ Configuration error: {ve}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Configuration error: {str(ve)}")
     
     except Exception as e:
+        print(f"❌ Chat error: {type(e).__name__}: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
