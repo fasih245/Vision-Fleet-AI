@@ -242,7 +242,22 @@ Answer:"""
                         "role": "system",
                         "content": "You are a helpful AI assistant. Answer questions clearly and concisely."
                     },
-        import traceback
+                    {
+                        "role": "user",
+                        "content": request.question
+                    }
+                ],
+                temperature=0.7,
+                max_tokens=1024,
+            )
+            
+            answer = completion.choices[0].message.content
+
+    except ValueError as ve:
+        print(f"❌ Configuration error: {ve}")
+        raise HTTPException(status_code=500, detail=f"Configuration error: {str(ve)}")
+    
+    except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
