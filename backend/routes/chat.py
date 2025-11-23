@@ -249,51 +249,6 @@ Answer:"""
                 ],
                 temperature=0.7,
                 max_tokens=1024,
-            )
-            
-            answer = completion.choices[0].message.content
-            sources = []
-        
-        # Save to Supabase
-        if request.conversation_id:
-            supabase = get_supabase_client()
-            if supabase:
-                try:
-                    # Check if this is the first message (or title is default)
-                    # We do this check BEFORE saving the new message to see if it was empty before
-                    # Actually, easier to just check the current title
-                    conv_data = supabase.table('conversations').select('title').eq('id', request.conversation_id).single().execute()
-                    current_title = conv_data.data.get('title') if conv_data.data else None
-                    
-                    # Save message
-                    supabase.table('messages').insert({
-                        'conversation_id': request.conversation_id,
-                        'user_message': request.question,
-                        'assistant_response': answer,
-                        'sources': sources if sources else None
-                    }).execute()
-                    
-                    # Update timestamp
-                    supabase.table('conversations').update({
-                        'updated_at': 'now()'
-                    }).eq('id', request.conversation_id).execute()
-                    
-                    # Trigger auto-naming if title is default
-                    if current_title in ['New Chat', 'New Conversation']:
-                        background_tasks.add_task(
-                            generate_title_background, 
-                            request.conversation_id, 
-                            request.question
-                        )
-                    
-                except Exception as db_error:
-                    print(f"⚠️  Failed to save to database: {db_error}")
-        
-        return ChatResponse(
-            answer=answer,
-            sources=sources,
-            conversation_id=request.conversation_id
-        )
     
     except ValueError as ve:
         print(f"❌ Configuration error: {ve}")

@@ -194,23 +194,6 @@ class FAISSVectorStore:
                     continue
                 
                 doc = self.documents[idx]
-                distance = float(distances[0][i])
-                
-                # Check user access
-                doc_user_id = doc.metadata.get("user_id")
-                
-                # Allow access if:
-                # 1. Document belongs to user
-                # 2. Document is public (no user_id) - optional policy
-                # 3. User is admin (not implemented yet)
-                if user_id and doc_user_id and doc_user_id != user_id:
-                    # Skip documents belonging to other users
-                    continue
-                
-                results.append((doc, distance))
-                
-                # Stop once we have enough filtered results
-                if len(results) >= k:
                     break
             
             print(f"✓ Returning {len(results)} results (after filtering)")
