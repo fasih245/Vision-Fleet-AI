@@ -253,6 +253,51 @@ Answer:"""
             
             answer = completion.choices[0].message.content
 
+        # Save to Supabase
+        if request.conversation_id:
+            supabase = get_supabase_client()
+            if supabase:
+                try:
+                    # Check if this is the first message (or title is default)
+                    conv_data = supabase.table('conversations').select('title').eq('id', request.conversation_id).single().execute()
+                    current_title = conv_data.data.get('title') if conv_data.data else None
+                    
+                    # Save message
+                    message_data = {
+                        'conversation_id': request.conversation_id,
+                        'user_message': request.question,
+                        'assistant_response': answer,
+                        'sources': sources if sources else None,
+                        'model_used': "llama-3.3-70b-versatile",
+                    }
+                    
+                    supabase.table('messages').insert(message_data).execute()
+                    print(f"✓ Saved message to conversation {request.conversation_id}")
+                    
+                    # Update timestamp
+                    supabase.table('conversations').update({
+                        'updated_at': 'now()'
+                    }).eq('id', request.conversation_id).execute()
+                    
+                    # Trigger auto-naming if title is default
+                    if current_title in ['New Chat', 'New Conversation']:
+                        background_tasks.add_task(
+                            generate_title_background, 
+                            request.conversation_id, 
+                            request.question
+                        )
+                    
+                except Exception as db_error:
+                    print(f"⚠️  Failed to save to database: {db_error}")
+        else:
+            print("⚠️  No conversation_id provided, message not saved to history")
+
+        return ChatResponse(
+            answer=answer,
+            sources=sources,
+            conversation_id=request.conversation_id
+        )
+
     except ValueError as ve:
         print(f"❌ Configuration error: {ve}")
         raise HTTPException(status_code=500, detail=f"Configuration error: {str(ve)}")
