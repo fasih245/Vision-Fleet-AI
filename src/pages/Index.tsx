@@ -18,6 +18,13 @@ const Index = () => {
     checkWelcomePopup();
   }, []);
 
+  // Persist conversation ID
+  useEffect(() => {
+    if (currentConversationId) {
+      localStorage.setItem('lastConversationId', currentConversationId);
+    }
+  }, [currentConversationId]);
+
   const checkWelcomePopup = async () => {
     try {
       // Get current user session
@@ -51,37 +58,76 @@ const Index = () => {
           setShowWelcome(true);
           sessionStorage.setItem('welcomeShown', 'true');
         }
-        if (isLoading || !currentConversationId) {
-          return (
-            <Layout>
-              <div className="h-full flex items-center justify-center">
-                <RefreshCw className="w-8 h-8 animate-spin text-muted-foreground" />
-              </div>
-            </Layout>
-          );
+      }
+    } catch (error) {
+      console.error("Error checking welcome popup:", error);
+    }
+  };
+
+  const initializeChat = async () => {
+    try {
+      const docs = await dbOperations.getDocuments();
+      setDocumentsCount(docs.length);
+
+      const conversations = await dbOperations.getConversations();
+
+      if (conversations.length > 0) {
+        // Try to restore last active conversation
+        const lastId = localStorage.getItem('lastConversationId');
+        const lastConv = conversations.find(c => c.id === lastId);
+
+        if (lastConv) {
+          setCurrentConversationId(lastConv.id);
+        } else {
+          // Fallback to most recent
+          setCurrentConversationId(conversations[0].id);
         }
+      } else {
+        const newConv = await dbOperations.createConversation("New Chat");
+        setCurrentConversationId(newConv.id);
+      }
+    } catch (error) {
+      console.error("Error initializing chat:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-        return (
-          <Layout
-            conversationId={currentConversationId}
-            onConversationChange={setCurrentConversationId}
-          >
-            <div className="h-full flex flex-col">
-              <ChatInterface
-                conversationId={currentConversationId}
-                documentsCount={documentsCount}
-              />
-            </div>
+  const handleCloseWelcome = () => {
+    setShowWelcome(false);
+  };
 
-            {/* Welcome Popup */}
-            {showWelcome && (
-              <WelcomePopup
-                userName={userName}
-                onClose={handleCloseWelcome}
-              />
-            )}
-          </Layout>
-        );
-      };
+  if (isLoading || !currentConversationId) {
+    return (
+      <Layout>
+        <div className="h-full flex items-center justify-center">
+          <RefreshCw className="w-8 h-8 animate-spin text-muted-foreground" />
+        </div>
+      </Layout>
+    );
+  }
 
-      export default Index;
+  return (
+    <Layout
+      conversationId={currentConversationId}
+      onConversationChange={setCurrentConversationId}
+    >
+      <div className="h-full flex flex-col">
+        <ChatInterface
+          conversationId={currentConversationId}
+          documentsCount={documentsCount}
+        />
+      </div>
+
+      {/* Welcome Popup */}
+      {showWelcome && (
+        <WelcomePopup
+          userName={userName}
+          onClose={handleCloseWelcome}
+        />
+      )}
+    </Layout>
+  );
+};
+
+export default Index;
