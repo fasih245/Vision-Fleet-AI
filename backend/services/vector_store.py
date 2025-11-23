@@ -152,12 +152,12 @@ class FAISSVectorStore:
         user_id: str = None
     ) -> List[Tuple[Document, float]]:
         """
-        Search for similar documents
+        Search for similar documents with user scoping
         
         Args:
             query: Search query text
             k: Number of results to return
-            user_id: Optional user ID to filter results
+            user_id: The user ID to filter by (required for security)
             
         Returns:
             List of (Document, distance) tuples
@@ -175,13 +175,18 @@ class FAISSVectorStore:
             # Create query embedding
             query_embedding = self.create_embeddings([query])
             
-            # Search in FAISS (get more results for filtering)
-            search_k = k * 3 if user_id else k
-            distances, indices = self.index.search(query_embedding, search_k)
+            # Search in FAISS
+            # Fetch more candidates to allow for filtering
+            # We fetch 5x the requested amount to ensure we have enough after filtering
+            fetch_k = k * 5
+            if fetch_k > self.index.ntotal:
+                fetch_k = self.index.ntotal
+                
+            distances, indices = self.index.search(query_embedding, fetch_k)
             
-            print(f"✓ Found {len(indices[0])} candidates")
+            print(f"✓ Found {len(indices[0])} candidates (before filtering)")
             
-            # Get relevant documents
+            # Get relevant documents with user filtering
             results = []
             for i, idx in enumerate(indices[0]):
                 if idx >= len(self.documents):
@@ -191,19 +196,24 @@ class FAISSVectorStore:
                 doc = self.documents[idx]
                 distance = float(distances[0][i])
                 
-                # Filter by user_id if provided
-                if user_id:
-                    doc_user_id = doc.metadata.get("user_id", "")
-                    if doc_user_id != user_id:
-                        continue
+                # Check user access
+                doc_user_id = doc.metadata.get("user_id")
+                
+                # Allow access if:
+                # 1. Document belongs to user
+                # 2. Document is public (no user_id) - optional policy
+                # 3. User is admin (not implemented yet)
+                if user_id and doc_user_id and doc_user_id != user_id:
+                    # Skip documents belonging to other users
+                    continue
                 
                 results.append((doc, distance))
                 
-                # Stop when we have enough results
+                # Stop once we have enough filtered results
                 if len(results) >= k:
                     break
             
-            print(f"✓ Returning {len(results)} results")
+            print(f"✓ Returning {len(results)} results (after filtering)")
             
             # Log top result for debugging
             if results:
@@ -218,7 +228,7 @@ class FAISSVectorStore:
             import traceback
             traceback.print_exc()
             return []
-    
+
     def save_index(self):
         """Save FAISS index and documents to disk"""
         try:

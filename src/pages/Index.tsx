@@ -22,7 +22,7 @@ const Index = () => {
     try {
       // Get current user session
       const { data: { session } } = await supabase.auth.getSession();
-      
+
       if (session?.user) {
         // Get user profile for name
         try {
@@ -33,10 +33,10 @@ const Index = () => {
             .single();
 
           // Set user name (fallback to email username if no profile)
-          const name = profile?.full_name || 
-                       profile?.username || 
-                       session.user.email?.split('@')[0] || 
-                       "";
+          const name = profile?.full_name ||
+            profile?.username ||
+            session.user.email?.split('@')[0] ||
+            "";
           setUserName(name);
         } catch (profileError) {
           console.log("No profile found, using email");
@@ -45,73 +45,43 @@ const Index = () => {
 
         // Check if welcome should be shown
         const welcomeShown = sessionStorage.getItem('welcomeShown');
-        
+
         if (!welcomeShown) {
           // Show welcome popup on first load of session
           setShowWelcome(true);
           sessionStorage.setItem('welcomeShown', 'true');
         }
-      }
-    } catch (error) {
-      console.error("Error checking welcome popup:", error);
-    }
-  };
+        if (isLoading || !currentConversationId) {
+          return (
+            <Layout>
+              <div className="h-full flex items-center justify-center">
+                <RefreshCw className="w-8 h-8 animate-spin text-muted-foreground" />
+              </div>
+            </Layout>
+          );
+        }
 
-  const initializeChat = async () => {
-    try {
-      const docs = await dbOperations.getDocuments();
-      setDocumentsCount(docs.length);
+        return (
+          <Layout
+            conversationId={currentConversationId}
+            onConversationChange={setCurrentConversationId}
+          >
+            <div className="h-full flex flex-col">
+              <ChatInterface
+                conversationId={currentConversationId}
+                documentsCount={documentsCount}
+              />
+            </div>
 
-      const conversations = await dbOperations.getConversations();
-      
-      if (conversations.length > 0) {
-        setCurrentConversationId(conversations[0].id);
-      } else {
-        const newConv = await dbOperations.createConversation("New Chat");
-        setCurrentConversationId(newConv.id);
-      }
-    } catch (error) {
-      console.error("Error initializing chat:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+            {/* Welcome Popup */}
+            {showWelcome && (
+              <WelcomePopup
+                userName={userName}
+                onClose={handleCloseWelcome}
+              />
+            )}
+          </Layout>
+        );
+      };
 
-  const handleCloseWelcome = () => {
-    setShowWelcome(false);
-  };
-
-  if (isLoading || !currentConversationId) {
-    return (
-      <Layout>
-        <div className="h-full flex items-center justify-center">
-          <RefreshCw className="w-8 h-8 animate-spin text-muted-foreground" />
-        </div>
-      </Layout>
-    );
-  }
-
-  return (
-    <Layout 
-      conversationId={currentConversationId}
-      onConversationChange={setCurrentConversationId}
-    >
-      <div className="h-full flex flex-col">
-        <ChatInterface 
-          conversationId={currentConversationId}
-          documentsCount={documentsCount}
-        />
-      </div>
-
-      {/* Welcome Popup */}
-      {showWelcome && (
-        <WelcomePopup 
-          userName={userName}
-          onClose={handleCloseWelcome}
-        />
-      )}
-    </Layout>
-  );
-};
-
-export default Index;
+      export default Index;

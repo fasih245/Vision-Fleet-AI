@@ -1,26 +1,21 @@
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, BackgroundTasks
 from pydantic import BaseModel
-from typing import Optional, List
-from services.vector_store import FAISSVectorStore
-from groq import Groq
+from typing import List, Optional, Dict
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
+from groq import Groq
+from services.dependencies import get_vector_store
 
 router = APIRouter()
 
-# Initialize services
-vector_store = None
+# Global clients
 groq_client = None
 
 def get_services():
     """Initialize services lazily"""
-    global vector_store, groq_client
+    global groq_client
     
-    if vector_store is None:
-        vector_store = FAISSVectorStore()
-        print("✓ Vector store initialized")
+    # Get singleton vector store
+    vector_store = get_vector_store()
     
     if groq_client is None:
         groq_api_key = os.getenv("GROQ_API_KEY")
@@ -43,7 +38,7 @@ def get_supabase_client():
         
         from supabase import create_client, Client
         client: Client = create_client(supabase_url, supabase_key)
-        print("✓ Supabase client initialized")
+        # print("✓ Supabase client initialized") # Reduce noise
         return client
         
     except ImportError:
@@ -78,6 +73,41 @@ def get_user_id_from_token(authorization: Optional[str]) -> Optional[str]:
         print(f"⚠️  Token validation error: {e}")
         return "anonymous"
 
+async def generate_title_background(conversation_id: str, first_message: str):
+    """Generate and update conversation title in background"""
+    try:
+        print(f"🤖 Generating title for conversation {conversation_id}...")
+        _, client = get_services()
+        
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "Summarize the user's message into a short, concise title (max 5 words). Return ONLY the title, no quotes or extra text."
+                },
+                {
+                    "role": "user", 
+                    "content": first_message
+                }
+            ],
+            max_tokens=20,
+            temperature=0.5
+        )
+        
+        title = completion.choices[0].message.content.strip().strip('"')
+        print(f"✓ Generated title: {title}")
+        
+        supabase = get_supabase_client()
+        if supabase:
+            supabase.table('conversations').update({
+                'title': title
+            }).eq('id', conversation_id).execute()
+            print(f"✓ Updated conversation title in DB")
+            
+    except Exception as e:
+        print(f"⚠️  Failed to auto-generate title: {e}")
+
 class ChatRequest(BaseModel):
     question: str
     use_rag: bool = True
@@ -91,6 +121,7 @@ class ChatResponse(BaseModel):
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
+    background_tasks: BackgroundTasks,
     authorization: Optional[str] = Header(None)
 ):
     """
@@ -118,10 +149,10 @@ async def chat(
         if request.use_rag:
             print("🔍 Using RAG mode...")
             
-            # Search for relevant documents - GET MORE RESULTS
+            # Search for relevant documents
             search_results = vector_store.search(
                 request.question,
-                k=20,  # ← INCREASED from 4 to 20
+                k=20,
                 user_id=user_id
             )
             
@@ -132,11 +163,10 @@ async def chat(
             else:
                 print(f"✓ Found {len(search_results)} total chunks")
                 
-                # FILTER BY RELEVANCE - Only keep very relevant chunks
-                # Lower distance = more similar/relevant
+                # FILTER BY RELEVANCE
                 relevant_results = [
                     (doc, score) for doc, score in search_results
-                    if score < 1.8  # ← Only keep chunks with distance < 1.8
+                    if score < 1.8
                 ]
                 
                 print(f"✓ Filtered to {len(relevant_results)} relevant chunks (distance < 1.8)")
@@ -149,18 +179,13 @@ async def chat(
                     # Use top 4-6 most relevant chunks
                     final_results = relevant_results[:6]
                     
-                    print(f"✓ Using top {len(final_results)} chunks:")
-                    for i, (doc, score) in enumerate(final_results):
-                        source_name = doc.metadata.get('source', 'unknown')
-                        print(f"   {i+1}. {source_name} (distance: {score:.4f})")
-                    
-                    # Build context from search results
+                    # Build context
                     context = "\n\n".join([
                         f"[Document: {doc.metadata.get('source', 'Unknown')}]\n{doc.page_content}"
                         for doc, score in final_results
                     ])
                     
-                    # Create prompt with context
+                    # Create prompt
                     prompt = f"""You are a helpful AI assistant analyzing documents. Use the following context to answer the user's question accurately and specifically.
 
 Context from documents:
@@ -176,7 +201,7 @@ Instructions:
 
 Answer:"""
                     
-                    # Generate response with Groq
+                    # Generate response
                     print("🤖 Generating response with context...")
                     completion = groq_client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
@@ -190,7 +215,7 @@ Answer:"""
                                 "content": prompt
                             }
                         ],
-                        temperature=0.3,  # ← Lower temperature for more factual responses
+                        temperature=0.3,
                         max_tokens=1024,
                     )
                     
@@ -205,13 +230,11 @@ Answer:"""
                         }
                         for doc, score in final_results
                     ]
-                    
-                    print(f"✓ Generated response with {len(sources)} sources")
         
         else:
             print("💬 Using LLM-only mode...")
             
-            # Direct LLM conversation without RAG
+            # Direct LLM conversation
             completion = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[
@@ -230,37 +253,41 @@ Answer:"""
             
             answer = completion.choices[0].message.content
             sources = []
-            
-            print("✓ Generated direct LLM response")
         
-        # Save to Supabase if conversation_id provided
+        # Save to Supabase
         if request.conversation_id:
             supabase = get_supabase_client()
             if supabase:
                 try:
-                    print(f"💾 Saving message to conversation: {request.conversation_id}")
+                    # Check if this is the first message (or title is default)
+                    # We do this check BEFORE saving the new message to see if it was empty before
+                    # Actually, easier to just check the current title
+                    conv_data = supabase.table('conversations').select('title').eq('id', request.conversation_id).single().execute()
+                    current_title = conv_data.data.get('title') if conv_data.data else None
                     
                     # Save message
-                    message_result = supabase.table('messages').insert({
+                    supabase.table('messages').insert({
                         'conversation_id': request.conversation_id,
                         'user_message': request.question,
                         'assistant_response': answer,
                         'sources': sources if sources else None
                     }).execute()
                     
-                    if message_result.data:
-                        print(f"✓ Message saved to database")
-                    
-                    # Update conversation timestamp
+                    # Update timestamp
                     supabase.table('conversations').update({
                         'updated_at': 'now()'
                     }).eq('id', request.conversation_id).execute()
                     
+                    # Trigger auto-naming if title is default
+                    if current_title in ['New Chat', 'New Conversation']:
+                        background_tasks.add_task(
+                            generate_title_background, 
+                            request.conversation_id, 
+                            request.question
+                        )
+                    
                 except Exception as db_error:
                     print(f"⚠️  Failed to save to database: {db_error}")
-                    # Don't fail the request if DB save fails
-        
-        print("✅ Response generated successfully")
         
         return ChatResponse(
             answer=answer,
@@ -270,19 +297,13 @@ Answer:"""
     
     except ValueError as ve:
         print(f"❌ Configuration error: {ve}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Configuration error: {str(ve)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Configuration error: {str(ve)}")
     
     except Exception as e:
         print(f"❌ Chat error: {type(e).__name__}: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Chat failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
 @router.get("/conversations/{conversation_id}/messages")
 async def get_conversation_messages(
@@ -291,60 +312,26 @@ async def get_conversation_messages(
 ):
     """Get all messages from a conversation"""
     try:
-        print(f"\n📥 Loading messages for conversation: {conversation_id}")
-        
-        # Get user ID
         user_id = get_user_id_from_token(authorization)
-        
         if not user_id:
             user_id = "anonymous"
-            print("⚠️  No authentication - using anonymous")
         
         supabase = get_supabase_client()
         if not supabase:
-            print("⚠️  Supabase not available")
-            return {
-                "messages": [],
-                "count": 0,
-                "conversation_id": conversation_id
-            }
+            return {"messages": [], "count": 0, "conversation_id": conversation_id}
         
-        # Verify conversation ownership
-        print(f"🔍 Verifying conversation ownership...")
-        conv_result = supabase.table('conversations')\
-            .select('user_id, title')\
-            .eq('id', conversation_id)\
-            .single()\
-            .execute()
+        # Verify ownership
+        conv_result = supabase.table('conversations').select('user_id, title').eq('id', conversation_id).single().execute()
         
         if not conv_result.data:
-            print(f"❌ Conversation not found: {conversation_id}")
-            raise HTTPException(
-                status_code=404,
-                detail="Conversation not found"
-            )
+            raise HTTPException(status_code=404, detail="Conversation not found")
         
-        # Check if user owns this conversation
         if conv_result.data['user_id'] != user_id and user_id != "anonymous":
-            print(f"❌ Unauthorized access attempt")
-            raise HTTPException(
-                status_code=403,
-                detail="Unauthorized: You don't own this conversation"
-            )
-        
-        print(f"✓ Conversation verified: {conv_result.data.get('title', 'Untitled')}")
+            raise HTTPException(status_code=403, detail="Unauthorized")
         
         # Get messages
-        print(f"📨 Fetching messages...")
-        messages_result = supabase.table('messages')\
-            .select('*')\
-            .eq('conversation_id', conversation_id)\
-            .order('created_at', desc=False)\
-            .execute()
-        
+        messages_result = supabase.table('messages').select('*').eq('conversation_id', conversation_id).order('created_at', desc=False).execute()
         messages = messages_result.data if messages_result.data else []
-        
-        print(f"✅ Loaded {len(messages)} messages")
         
         return {
             "messages": messages,
@@ -355,63 +342,29 @@ async def get_conversation_messages(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error loading messages: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to load messages: {str(e)}"
-        )
+        print(f"❌ Error loading messages: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load messages: {str(e)}")
 
 @router.get("/conversations")
-async def get_user_conversations(
-    authorization: Optional[str] = Header(None)
-):
+async def get_user_conversations(authorization: Optional[str] = Header(None)):
     """Get all conversations for the authenticated user"""
     try:
-        print(f"\n📋 Loading user conversations...")
-        
-        # Get user ID
         user_id = get_user_id_from_token(authorization)
-        
         if not user_id:
             user_id = "anonymous"
-            print("⚠️  No authentication - using anonymous")
-        
-        print(f"👤 User ID: {user_id}")
         
         supabase = get_supabase_client()
         if not supabase:
-            print("⚠️  Supabase not available")
-            return {
-                "conversations": [],
-                "count": 0
-            }
+            return {"conversations": [], "count": 0}
         
-        # Get conversations
-        conv_result = supabase.table('conversations')\
-            .select('*')\
-            .eq('user_id', user_id)\
-            .order('updated_at', desc=True)\
-            .execute()
-        
+        conv_result = supabase.table('conversations').select('*').eq('user_id', user_id).order('updated_at', desc=True).execute()
         conversations = conv_result.data if conv_result.data else []
         
-        print(f"✅ Loaded {len(conversations)} conversations")
-        
-        return {
-            "conversations": conversations,
-            "count": len(conversations)
-        }
+        return {"conversations": conversations, "count": len(conversations)}
         
     except Exception as e:
-        print(f"❌ Error loading conversations: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to load conversations: {str(e)}"
-        )
+        print(f"❌ Error loading conversations: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load conversations: {str(e)}")
 
 @router.post("/conversations")
 async def create_conversation(
@@ -420,125 +373,63 @@ async def create_conversation(
 ):
     """Create a new conversation"""
     try:
-        print(f"\n➕ Creating new conversation...")
-        
-        # Get user ID
         user_id = get_user_id_from_token(authorization)
-        
         if not user_id:
             user_id = "anonymous"
-            print("⚠️  No authentication - using anonymous")
-        
-        print(f"👤 User ID: {user_id}")
         
         supabase = get_supabase_client()
         if not supabase:
-            raise HTTPException(
-                status_code=503,
-                detail="Database service unavailable"
-            )
+            raise HTTPException(status_code=503, detail="Database service unavailable")
         
-        # Create conversation
         conv_result = supabase.table('conversations').insert({
             'user_id': user_id,
-            'title': title or 'New Conversation'
+            'title': title or 'New Chat'
         }).execute()
         
         if not conv_result.data:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to create conversation"
-            )
+            raise HTTPException(status_code=500, detail="Failed to create conversation")
         
-        conversation = conv_result.data[0]
-        
-        print(f"✅ Created conversation: {conversation['id']}")
-        
-        return {
-            "conversation": conversation,
-            "message": "Conversation created successfully"
-        }
+        return {"conversation": conv_result.data[0], "message": "Conversation created successfully"}
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error creating conversation: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create conversation: {str(e)}"
-        )
+        print(f"❌ Error creating conversation: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create conversation: {str(e)}")
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
     authorization: Optional[str] = Header(None)
 ):
-    """Delete a conversation and all its messages"""
+    """Delete a conversation"""
     try:
-        print(f"\n🗑️  Deleting conversation: {conversation_id}")
-        
-        # Get user ID
         user_id = get_user_id_from_token(authorization)
-        
         if not user_id:
-            raise HTTPException(
-                status_code=401,
-                detail="Authentication required"
-            )
+            raise HTTPException(status_code=401, detail="Authentication required")
         
         supabase = get_supabase_client()
         if not supabase:
-            raise HTTPException(
-                status_code=503,
-                detail="Database service unavailable"
-            )
+            raise HTTPException(status_code=503, detail="Database service unavailable")
         
         # Verify ownership
-        conv_result = supabase.table('conversations')\
-            .select('user_id, title')\
-            .eq('id', conversation_id)\
-            .single()\
-            .execute()
-        
+        conv_result = supabase.table('conversations').select('user_id').eq('id', conversation_id).single().execute()
         if not conv_result.data:
-            raise HTTPException(
-                status_code=404,
-                detail="Conversation not found"
-            )
+            raise HTTPException(status_code=404, detail="Conversation not found")
         
         if conv_result.data['user_id'] != user_id and user_id != "anonymous":
-            raise HTTPException(
-                status_code=403,
-                detail="Unauthorized: You don't own this conversation"
-            )
+            raise HTTPException(status_code=403, detail="Unauthorized")
         
-        # Delete conversation (cascades to messages)
-        supabase.table('conversations')\
-            .delete()\
-            .eq('id', conversation_id)\
-            .execute()
+        supabase.table('conversations').delete().eq('id', conversation_id).execute()
         
-        print(f"✅ Deleted conversation: {conv_result.data.get('title', 'Untitled')}")
-        
-        return {
-            "message": "Conversation deleted successfully",
-            "conversation_id": conversation_id
-        }
+        return {"message": "Conversation deleted successfully", "conversation_id": conversation_id}
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error deleting conversation: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete conversation: {str(e)}"
-        )
+        print(f"❌ Error deleting conversation: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete conversation: {str(e)}")
 
 @router.options("/chat")
 async def chat_options():
-    """Handle CORS preflight for chat endpoint"""
     return {"status": "ok"}
