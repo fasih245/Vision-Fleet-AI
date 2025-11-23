@@ -194,6 +194,25 @@ class FAISSVectorStore:
                     continue
                 
                 doc = self.documents[idx]
+                distance = float(distances[0][i])
+                
+                # Check user access
+                doc_user_id = doc.metadata.get("user_id")
+                
+                # STRICT SECURITY: If document has no user_id, it is ORPHANED/PRIVATE, not public.
+                if not doc_user_id:
+                    # print(f"   Skipping orphaned document (no user_id)")
+                    continue
+
+                if user_id and doc_user_id != user_id:
+                    # Skip documents belonging to other users
+                    # print(f"   Skipping document from other user")
+                    continue
+                
+                results.append((doc, distance))
+                
+                # Stop once we have enough filtered results
+                if len(results) >= k:
                     break
             
             print(f"✓ Returning {len(results)} results (after filtering)")
