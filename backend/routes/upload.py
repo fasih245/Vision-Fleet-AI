@@ -12,12 +12,16 @@ router = APIRouter()
 # Global services
 processor = None
 
-def get_services():
-    """Initialize document processing services"""
+def get_services(user_id: str):
+    """Initialize document processing services
+    
+    Args:
+        user_id: User ID for scoped vector store access
+    """
     global processor
     
-    # Get singleton vector store
-    vector_store = get_vector_store()
+    # Get user-scoped vector store
+    vector_store = get_vector_store(user_id)
     
     if processor is None:
         try:
@@ -98,10 +102,7 @@ async def upload_document(
         print("📤 UPLOAD REQUEST RECEIVED")
         print("="*60)
         
-        # Initialize services
-        processor, vector_store = get_services()
-        
-        # Get user ID
+        # Get user ID first
         user_id = get_user_id_from_token(authorization)
         if not user_id:
             user_id = "anonymous"
@@ -109,6 +110,9 @@ async def upload_document(
         
         print(f"👤 User ID: {user_id}")
         print(f"📄 File: {file.filename}")
+        
+        # Initialize services with user_id
+        processor, vector_store = get_services(user_id)
         
         # Validate file type
         allowed_extensions = ['.pdf', '.docx', '.txt', '.csv']
@@ -178,7 +182,7 @@ async def upload_document(
             cleanup_temp_file(file_path)
             raise HTTPException(status_code=400, detail="No text extracted from document")
         
-        # Tag chunks
+        # Tag chunks with user_id
         for i, doc in enumerate(documents):
             doc.metadata["user_id"] = user_id
             doc.metadata["document_id"] = document_id if document_id else "unknown"
@@ -186,7 +190,7 @@ async def upload_document(
             doc.metadata["chunk_index"] = i
             doc.metadata["total_chunks"] = len(documents)
         
-        # Add to vector store
+        # Add to vector store (user-scoped)
         print("\n🔄 Adding to vector store...")
         try:
             num_added = vector_store.add_documents(documents)

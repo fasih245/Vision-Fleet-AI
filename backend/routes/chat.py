@@ -2,9 +2,121 @@ from fastapi import APIRouter, HTTPException, Header, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import os
-import traceback
 from groq import Groq
 from services.dependencies import get_vector_store
+
+router = APIRouter()
+
+# Global clients
+groq_client = None
+
+def get_services(user_id: str):
+    """Initialize services lazily
+    
+    Args:
+        user_id: User ID for scoped vector store access
+    """
+    global groq_client
+    
+    # Get user-scoped vector store
+    vector_store = get_vector_store(user_id)
+    
+    if groq_client is None:
+        groq_api_key = os.getenv("GROQ_API_KEY")
+        if not groq_api_key:
+            raise ValueError("GROQ_API_KEY not found in environment variables")
+        groq_client = Groq(api_key=groq_api_key)
+        print("✓ Groq client initialized")
+    
+    return vector_store, groq_client
+
+def get_supabase_client():
+    """Get Supabase client"""
+    try:
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+        
+        if not supabase_url or not supabase_key:
+            print("⚠️  Supabase credentials not found in environment")
+            return None
+        
+        from supabase import create_client, Client
+        client: Client = create_client(supabase_url, supabase_key)
+        return client
+        
+    except ImportError:
+        print("⚠️  Supabase library not installed")
+        return None
+    except Exception as e:
+        print(f"⚠️  Supabase initialization error: {type(e).__name__}: {e}")
+        return None
+
+def get_user_id_from_token(authorization: Optional[str]) -> Optional[str]:
+    """Extract user ID from authorization token"""
+    if not authorization:
+        return None
+    
+    try:
+        token = authorization.replace("Bearer ", "").strip()
+        
+        if not token:
+            return None
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            return "anonymous"
+        
+        user_response = supabase.auth.get_user(token)
+        if user_response and hasattr(user_response, 'user') and user_response.user:
+            return user_response.user.id
+        
+        return "anonymous"
+        
+    except Exception as e:
+        print(f"⚠️  Token validation error: {e}")
+        return "anonymous"
+
+async def generate_title_background(conversation_id: str, first_message: str, user_id: str):
+    """Generate and update conversation title in background"""
+    try:
+        print(f"🤖 Generating title for conversation {conversation_id}...")
+        _, client = get_services(user_id)
+        
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "Summarize the user's message into a short, concise title (max 5 words). Return ONLY the title, no quotes or extra text."
+                },
+                {
+                    "role": "user", 
+                    "content": first_message
+                }
+            ],
+            max_tokens=20,
+            temperature=0.5
+        )
+        
+        title = completion.choices[0].message.content.strip().strip('"')
+        print(f"✓ Generated title: {title}")
+        
+        supabase = get_supabase_client()
+        if supabase:
+            supabase.table('conversations').update({
+                'title': title
+            }).eq('id', conversation_id).execute()
+            print(f"✓ Updated conversation title in DB")
+            
+    except Exception as e:
+        print(f"⚠️  Failed to auto-generate title: {e}")
+        import traceback
+        traceback.print_exc()
+
+class ChatRequest(BaseModel):
+    question: str
+    use_rag: bool = True
+    conversation_id: Optional[str] = None
 
 class ChatResponse(BaseModel):
     answer: str
@@ -22,10 +134,6 @@ async def chat(
     - If use_rag=True: Search documents and use context
     - If use_rag=False: Direct LLM conversation
     """
-    # Initialize defaults to prevent UnboundLocalError
-    answer = None
-    sources = []
-    
     try:
         print(f"\n📨 Received chat request: {request.question[:50]}...")
         print(f"🔧 RAG enabled: {request.use_rag}")
@@ -39,18 +147,17 @@ async def chat(
         else:
             print(f"👤 User ID: {user_id}")
         
-        # Initialize services
-        vector_store, groq_client = get_services()
+        # Initialize services with user_id
+        vector_store, groq_client = get_services(user_id)
         
         # Generate response based on mode
         if request.use_rag:
             print("🔍 Using RAG mode...")
             
-            # Search for relevant documents
+            # Search for relevant documents (user_id parameter deprecated - scoping at index level)
             search_results = vector_store.search(
                 request.question,
-                k=20,
-                user_id=user_id
+                k=20
             )
             
             if not search_results:
@@ -149,8 +256,8 @@ Answer:"""
             )
             
             answer = completion.choices[0].message.content
-            sources = []  # No sources in LLM-only mode
-
+            sources = []
+        
         # Save to Supabase
         if request.conversation_id:
             supabase = get_supabase_client()
@@ -161,16 +268,12 @@ Answer:"""
                     current_title = conv_data.data.get('title') if conv_data.data else None
                     
                     # Save message
-                    message_data = {
+                    supabase.table('messages').insert({
                         'conversation_id': request.conversation_id,
                         'user_message': request.question,
                         'assistant_response': answer,
-                        'sources': sources if sources else None,
-                        'model_used': "llama-3.3-70b-versatile",
-                    }
-                    
-                    supabase.table('messages').insert(message_data).execute()
-                    print(f"✓ Saved message to conversation {request.conversation_id}")
+                        'sources': sources if sources else None
+                    }).execute()
                     
                     # Update timestamp
                     supabase.table('conversations').update({
@@ -182,31 +285,26 @@ Answer:"""
                         background_tasks.add_task(
                             generate_title_background, 
                             request.conversation_id, 
-                            request.question
+                            request.question,
+                            user_id
                         )
                     
                 except Exception as db_error:
                     print(f"⚠️  Failed to save to database: {db_error}")
-        else:
-            print("⚠️  No conversation_id provided, message not saved to history")
-
-        # Defensive check: ensure answer exists
-        if answer is None:
-            raise ValueError("Failed to generate answer")
         
         return ChatResponse(
             answer=answer,
             sources=sources,
             conversation_id=request.conversation_id
         )
-
+    
     except ValueError as ve:
         print(f"❌ Configuration error: {ve}")
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Configuration error: {str(ve)}")
     
     except Exception as e:
         print(f"❌ Chat error: {type(e).__name__}: {str(e)}")
+        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
