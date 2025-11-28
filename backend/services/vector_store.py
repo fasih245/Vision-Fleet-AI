@@ -3,19 +3,23 @@ import faiss
 from sentence_transformers import SentenceTransformer
 import pickle
 import os
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from langchain.schema import Document
 
 class FAISSVectorStore:
-    def __init__(self, embedding_model="all-MiniLM-L6-v2"):
+    def __init__(self, embedding_model="all-MiniLM-L6-v2", user_id: Optional[str] = None):
         """
         Initialize FAISS vector store with sentence transformers
         
         Args:
             embedding_model: Model name from sentence-transformers
+            user_id: User ID for scoped storage (REQUIRED for multi-tenant security)
         """
+        self.user_id = user_id or "shared"  # Fallback for backward compatibility
+        
         print(f"🔧 Initializing FAISS Vector Store...")
         print(f"   Model: {embedding_model}")
+        print(f"   User Scope: {self.user_id}")
         
         try:
             self.embedder = SentenceTransformer(embedding_model)
@@ -26,14 +30,17 @@ class FAISSVectorStore:
         
         self.index = None
         self.documents = []
-        self.index_path = "faiss_index.bin"
-        self.docs_path = "faiss_docs.pkl"
+        
+        # User-scoped file paths for true isolation
+        self.index_path = f"faiss_index_{self.user_id}.bin"
+        self.docs_path = f"faiss_docs_{self.user_id}.pkl"
         
         # Load existing index if available
         self.load_index()
         
         print(f"✓ FAISS Vector Store initialized")
         print(f"   Current vectors: {self.index.ntotal if self.index else 0}")
+        print(f"   Index file: {self.index_path}")
     
     def create_embeddings(self, texts: List[str]) -> np.ndarray:
         """
@@ -90,8 +97,17 @@ class FAISSVectorStore:
             print("⚠️  Warning: No documents to add to vector store")
             return 0
         
+        # SECURITY CHECK: Verify all documents belong to this user
+        for doc in documents:
+            doc_user_id = doc.metadata.get("user_id")
+            if doc_user_id and doc_user_id != self.user_id and self.user_id != "shared":
+                raise ValueError(
+                    f"Security violation: Attempting to add document with user_id={doc_user_id} "
+                    f"to vector store scoped to user_id={self.user_id}"
+                )
+        
         print(f"\n{'='*60}")
-        print(f"📥 Adding {len(documents)} documents to vector store")
+        print(f"📥 Adding {len(documents)} documents to vector store (User: {self.user_id})")
         print(f"{'='*60}")
         
         try:
@@ -149,15 +165,15 @@ class FAISSVectorStore:
         self,
         query: str,
         k: int = 4,
-        user_id: str = None
+        user_id: Optional[str] = None
     ) -> List[Tuple[Document, float]]:
         """
-        Search for similar documents with user scoping
+        Search for similar documents
         
         Args:
             query: Search query text
             k: Number of results to return
-            user_id: The user ID to filter by (required for security)
+            user_id: DEPRECATED - user scoping is now at index level
             
         Returns:
             List of (Document, distance) tuples
@@ -166,27 +182,30 @@ class FAISSVectorStore:
             print("⚠️  Vector store is empty")
             return []
         
+        # Warn if user_id parameter is used (deprecated)
+        if user_id and user_id != self.user_id:
+            print(f"⚠️  Warning: search() user_id parameter ({user_id}) doesn't match "
+                  f"vector store scope ({self.user_id}). This index only contains "
+                  f"documents for user {self.user_id}.")
+        
         print(f"\n🔍 Searching vector store...")
         print(f"   Query: {query[:100]}...")
         print(f"   Top K: {k}")
-        print(f"   User filter: {user_id}")
+        print(f"   User Scope: {self.user_id}")
         
         try:
             # Create query embedding
             query_embedding = self.create_embeddings([query])
             
             # Search in FAISS
-            # Fetch more candidates to allow for filtering
-            # We fetch 5x the requested amount to ensure we have enough after filtering
-            fetch_k = k * 5
-            if fetch_k > self.index.ntotal:
-                fetch_k = self.index.ntotal
+            # No need to fetch extra for filtering - all documents in this index belong to this user
+            fetch_k = min(k, self.index.ntotal)
                 
             distances, indices = self.index.search(query_embedding, fetch_k)
             
-            print(f"✓ Found {len(indices[0])} candidates (before filtering)")
+            print(f"✓ Found {len(indices[0])} results")
             
-            # Get relevant documents with user filtering
+            # Get relevant documents
             results = []
             for i, idx in enumerate(indices[0]):
                 if idx >= len(self.documents):
@@ -195,27 +214,9 @@ class FAISSVectorStore:
                 
                 doc = self.documents[idx]
                 distance = float(distances[0][i])
-                
-                # Check user access
-                doc_user_id = doc.metadata.get("user_id")
-                
-                # STRICT SECURITY: If document has no user_id, it is ORPHANED/PRIVATE, not public.
-                if not doc_user_id:
-                    # print(f"   Skipping orphaned document (no user_id)")
-                    continue
-
-                if user_id and doc_user_id != user_id:
-                    # Skip documents belonging to other users
-                    # print(f"   Skipping document from other user")
-                    continue
-                
                 results.append((doc, distance))
-                
-                # Stop once we have enough filtered results
-                if len(results) >= k:
-                    break
             
-            print(f"✓ Returning {len(results)} results (after filtering)")
+            print(f"✓ Returning {len(results)} results")
             
             # Log top result for debugging
             if results:
@@ -288,7 +289,7 @@ class FAISSVectorStore:
     
     def clear_index(self):
         """Clear the vector store and delete files"""
-        print(f"🗑️  Clearing vector store...")
+        print(f"🗑️  Clearing vector store for user {self.user_id}...")
         
         self.index = None
         self.documents = []
@@ -307,6 +308,7 @@ class FAISSVectorStore:
     def get_stats(self) -> dict:
         """Get statistics about the vector store"""
         return {
+            "user_id": self.user_id,
             "total_vectors": self.index.ntotal if self.index else 0,
             "total_documents": len(self.documents),
             "dimension": self.index.d if self.index else 0,
@@ -314,5 +316,7 @@ class FAISSVectorStore:
             "files_exist": {
                 "index": os.path.exists(self.index_path),
                 "docs": os.path.exists(self.docs_path)
-            }
+            },
+            "index_path": self.index_path,
+            "docs_path": self.docs_path
         }

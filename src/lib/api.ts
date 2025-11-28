@@ -22,11 +22,15 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-export const sendChatMessage = async (conversationId: string, question: string, use_rag: boolean = true) => {
+export const sendChatMessage = async (params: {
+  question: string;
+  use_rag: boolean;
+  conversation_id: string;
+}) => {
   const response = await api.post('/chat', {
-    question,
-    use_rag,
-    conversation_id: conversationId,
+    question: params.question,
+    use_rag: params.use_rag,
+    conversation_id: params.conversation_id,
   });
   return response.data;
 };
