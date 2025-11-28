@@ -1,9 +1,9 @@
-import numpy as np
-import faiss
-from sentence_transformers import SentenceTransformer
-import pickle
 import os
+import pickle
+import faiss
+import numpy as np
 from typing import List, Tuple, Optional
+from sentence_transformers import SentenceTransformer
 from langchain.schema import Document
 
 class FAISSVectorStore:
@@ -15,47 +15,30 @@ class FAISSVectorStore:
             embedding_model: Model name from sentence-transformers
             user_id: User ID for scoped storage (REQUIRED for multi-tenant security)
         """
-        self.user_id = user_id or "shared"  # Fallback for backward compatibility
+        self.user_id = user_id or "shared"
         
-        print(f"🔧 Initializing FAISS Vector Store...")
-        print(f"   Model: {embedding_model}")
-        print(f"   User Scope: {self.user_id}")
+        # User-scoped file paths for true isolation
+        # Use absolute paths to avoid CWD ambiguity
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        # Go up one level to backend root
+        backend_root = os.path.dirname(base_dir)
         
-        try:
-            self.embedder = SentenceTransformer(embedding_model)
-            print(f"✓ Sentence transformer loaded")
-        except Exception as e:
-            print(f"❌ Failed to load embedding model: {e}")
-            raise
+        self.index_path = os.path.join(backend_root, f"faiss_index_{self.user_id}.bin")
+        self.docs_path = os.path.join(backend_root, f"faiss_docs_{self.user_id}.pkl")
         
+        print(f"🔧 Initializing FAISSVectorStore for user: {self.user_id}")
+        print(f"   Index path: {self.index_path}")
+        
+        self.embedder = SentenceTransformer(embedding_model)
         self.index = None
         self.documents = []
         
-        # User-scoped file paths for true isolation
-        self.index_path = f"faiss_index_{self.user_id}.bin"
-        self.docs_path = f"faiss_docs_{self.user_id}.pkl"
-        
-        # Load existing index if available
+        # Load existing index or start fresh
         self.load_index()
-        
-        print(f"✓ FAISS Vector Store initialized")
-        print(f"   Current vectors: {self.index.ntotal if self.index else 0}")
-        print(f"   Index file: {self.index_path}")
     
     def create_embeddings(self, texts: List[str]) -> np.ndarray:
-        """
-        Create embeddings for a list of texts
-        
-        Args:
-            texts: List of text strings to embed
-            
-        Returns:
-            numpy array of embeddings (float32)
-        """
-        if not texts or len(texts) == 0:
-            raise ValueError("Cannot create embeddings: text list is empty")
-        
-        # Validate texts are not empty
+        """Create embeddings for a list of texts"""
+        # Filter empty strings
         valid_texts = [t for t in texts if t and t.strip()]
         if len(valid_texts) != len(texts):
             print(f"⚠️  Warning: {len(texts) - len(valid_texts)} empty texts filtered out")
@@ -262,8 +245,9 @@ class FAISSVectorStore:
     def load_index(self):
         """Load FAISS index and documents from disk"""
         try:
+            # Check for user-scoped index
             if os.path.exists(self.index_path) and os.path.exists(self.docs_path):
-                print(f"📂 Loading existing vector store...")
+                print(f"📂 Loading existing vector store for user {self.user_id}...")
                 
                 # Load FAISS index
                 self.index = faiss.read_index(self.index_path)
@@ -278,8 +262,56 @@ class FAISSVectorStore:
                 if self.index.ntotal != len(self.documents):
                     print(f"⚠️  Warning: Index size ({self.index.ntotal}) != "
                           f"Document count ({len(self.documents)})")
+            
+            # Check for LEGACY shared index (lazy migration)
             else:
-                print("📝 No existing index found - starting fresh")
+                # Construct path to legacy files (in same dir)
+                legacy_index_path = os.path.join(os.path.dirname(self.index_path), "faiss_index.bin")
+                legacy_docs_path = os.path.join(os.path.dirname(self.docs_path), "faiss_docs.pkl")
+                
+                if os.path.exists(legacy_index_path) and os.path.exists(legacy_docs_path):
+                    print(f"⚠️  User index missing. Checking for legacy shared index at {legacy_index_path}...")
+                    
+                    try:
+                        # Load legacy documents ONLY (we can't easily split the binary index)
+                        with open(legacy_docs_path, 'rb') as f:
+                            all_docs = pickle.load(f)
+                        
+                        # Filter for this user
+                        user_docs = []
+                        for doc in all_docs:
+                            # Check metadata for user_id
+                            doc_user_id = doc.metadata.get("user_id")
+                            
+                            # Match if user_id matches OR if user is 'anonymous' and doc has no user_id
+                            if doc_user_id == self.user_id:
+                                user_docs.append(doc)
+                            elif self.user_id == "anonymous" and not doc_user_id:
+                                user_docs.append(doc)
+                        
+                        if user_docs:
+                            print(f"🔄 Found {len(user_docs)} legacy documents for user {self.user_id}. Migrating...")
+                            
+                            # Initialize fresh index
+                            self.documents = []
+                            self.index = None
+                            
+                            # Add documents (this will re-embed and save to new path)
+                            self.add_documents(user_docs)
+                            print(f"✅ Successfully migrated {len(user_docs)} documents to {self.index_path}")
+                        else:
+                            print(f"ℹ️  No legacy documents found for user {self.user_id}")
+                            self.index = None
+                            self.documents = []
+                            
+                    except Exception as e:
+                        print(f"❌ Failed to migrate legacy index: {e}")
+                        self.index = None
+                        self.documents = []
+                else:
+                    print("📝 No existing index found - starting fresh")
+                    self.index = None
+                    self.documents = []
                 
         except Exception as e:
             print(f"⚠️  Failed to load existing index: {e}")
