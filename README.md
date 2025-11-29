@@ -388,7 +388,7 @@ graph TD
     B --> C[Text Extraction]
     C --> D[Text Chunking]
     D --> E[Generate Embeddings]
-    E --> F[Store in FAISS (User-Scoped)]
+    E --> F["Store in FAISS (User-Scoped)"]
     F --> G[Save Metadata to Supabase]
     G --> H[Document Ready]
 ```
@@ -399,7 +399,7 @@ graph TD
     A[User Asks Question] --> B{RAG Enabled?}
     B -->|Yes| C[Generate Query Embedding]
     B -->|No| D[Direct LLM]
-    C --> E[Search FAISS (User-Scoped)]
+    C --> E["Search FAISS (User-Scoped)"]
     E --> F[Retrieve Top K Chunks]
     F --> G[Build Context]
     G --> H[Send to LLM]
