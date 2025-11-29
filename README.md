@@ -55,7 +55,8 @@
 - **Vector Embeddings**: Uses Sentence Transformers for semantic understanding
 - **FAISS Vector Store**: Lightning-fast similarity search
 - **RAG Pipeline**: Combines document context with LLM generation
-- **User Isolation**: Each user's documents are private and secure
+- **Strict User Isolation**: Dedicated FAISS index files per user for maximum security
+- **Legacy Migration**: Automatic migration of old shared documents to private indexes
 - **Conversation History**: Persistent chat sessions stored in Supabase
 
 ### 🎯 Advanced Features
@@ -113,7 +114,7 @@
 
 ### RAG Pipeline Flow
 ```
-Document Upload → Text Extraction → Chunking → Embeddings → FAISS Index
+Document Upload → Text Extraction → Chunking → Embeddings → FAISS Index (User-Scoped)
                                                                   │
 User Query → Embedding → Similarity Search ←──────────────────────┘
                               │
@@ -157,7 +158,7 @@ User Query → Embedding → Similarity Search ←──────────
 | **python-docx** | DOCX Processing | 1.1 |
 
 ### Infrastructure
-- **FAISS**: In-memory vector search
+- **FAISS**: Local vector search with **user-scoped index files** (`faiss_index_{user_id}.bin`)
 - **Supabase**: PostgreSQL database + authentication
 - **Groq**: Llama 3.3 70B model inference
 
@@ -175,8 +176,9 @@ vision-fleet-ai-5aad3fcb/
 │   │   └── __init__.py
 │   ├── services/                 # Business logic
 │   │   ├── document_processor.py # Document parsing
-│   │   ├── vector_store.py       # FAISS operations
+│   │   ├── vector_store.py       # FAISS operations (User-Scoped)
 │   │   ├── rag_service.py        # RAG pipeline
+│   │   ├── dependencies.py       # Service injection
 │   │   └── __init__.py
 │   ├── requirements.txt          # Python dependencies
 │   ├── .env                      # Environment variables
@@ -386,7 +388,7 @@ graph TD
     B --> C[Text Extraction]
     C --> D[Text Chunking]
     D --> E[Generate Embeddings]
-    E --> F[Store in FAISS]
+    E --> F[Store in FAISS (User-Scoped)]
     F --> G[Save Metadata to Supabase]
     G --> H[Document Ready]
 ```
@@ -397,7 +399,7 @@ graph TD
     A[User Asks Question] --> B{RAG Enabled?}
     B -->|Yes| C[Generate Query Embedding]
     B -->|No| D[Direct LLM]
-    C --> E[Search FAISS]
+    C --> E[Search FAISS (User-Scoped)]
     E --> F[Retrieve Top K Chunks]
     F --> G[Build Context]
     G --> H[Send to LLM]
@@ -456,7 +458,8 @@ Content-Type: application/json
 Body:
 {
   "question": "What is the main topic?",
-  "use_rag": true
+  "use_rag": true,
+  "conversation_id": "uuid" (optional)
 }
 
 Response:
@@ -468,7 +471,8 @@ Response:
       "chunk_index": 5,
       "relevance_score": 0.92
     }
-  ]
+  ],
+  "conversation_id": "uuid"
 }
 ```
 
@@ -536,6 +540,9 @@ npm run test:e2e
 **Issue:** Supabase connection failed  
 **Solution:** Verify SUPABASE_URL and keys in .env
 
+**Issue:** "No documents found" after update  
+**Solution:** The system now uses user-private indexes. Legacy documents are automatically migrated to your private index on first access. If issues persist, check backend logs for migration status.
+
 ---
 
 ## 🤝 Contributing
@@ -558,7 +565,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👥 Authors
 
-- **Your Name** - *Initial work* - [GitHub Profile](https://github.com/yourusername)
+- **Fasih Ul Haq** - *Initial work* - [GitHub Profile](https://github.com/fasih245)
 
 ---
 
@@ -574,7 +581,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-For support, email support@visionfleet.ai or join our [Discord server](https://discord.gg/visionfleet).
+For support, email fasihulhaq245@gmail.com.
 
 ---
 
@@ -585,8 +592,3 @@ For support, email support@visionfleet.ai or join our [Discord server](https://d
 [⬆ Back to Top](#visionfleet-ai---intelligent-document-analysis-platform)
 
 </div>
-```
-
-**Save this as `README.md` in your project root:**
-```
-vision-fleet-ai-5aad3fcb/README.md
