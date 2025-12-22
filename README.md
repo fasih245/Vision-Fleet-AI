@@ -581,7 +581,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-For support, email fasihulhaq245@gmail.com.
+For support, email fasihulhaq245@gmail.com, smmehdi.swips@gmail.com, taqisyedzaidi123@gmail.com. 
 
 ---
 
