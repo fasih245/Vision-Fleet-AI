@@ -31,3 +31,4 @@ dist-ssr
 .env.production
 .env.development
 frontend/.env
+"backend/VectorRAG/" 
