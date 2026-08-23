@@ -68,7 +68,7 @@ Provide a comprehensive answer based on the context. If the context doesn't cont
                     {"role": "system", "content": "You are a helpful assistant that answers questions based on provided context."},
                     {"role": "user", "content": prompt}
                 ],
-                model="llama-3.3-70b-versatile",
+                model=os.getenv("LLM_MODEL", "llama-3.3-70b-versatile"),
                 temperature=0.2,
                 max_tokens=1024,
             )

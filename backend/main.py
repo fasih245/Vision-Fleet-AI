@@ -8,34 +8,36 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+_is_production = bool(os.getenv("PRODUCTION"))
+
 # Create FastAPI app
 app = FastAPI(
     title="VisionFleet RAG Backend API",
     description="AI-powered document analysis with RAG",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url=None if _is_production else "/docs",
+    redoc_url=None if _is_production else "/redoc",
+    openapi_url=None if _is_production else "/openapi.json",
 )
 
 # ============================================================================
 # CORS Configuration - MUST BE BEFORE ROUTES
 # ============================================================================
 app.add_middleware(
-    CORSMiddleware, 
+    CORSMiddleware,
     allow_origins=[
         # Local development
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
-        
+
         # Production - Add your actual Netlify URL
         "https://visionfleetai.netlify.app",
         "https://*.netlify.app",  # All Netlify preview deployments
-        
+
         # Ngrok
         "https://unmodern-coadunate-jacque.ngrok-free.dev",
-        
-        # Allow all for development (remove in production if needed)
-        "*"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -60,7 +62,7 @@ async def root():
         "message": "VisionFleet RAG Backend API is running",
         "status": "online",
         "version": "1.0.0",
-        "docs": "/docs",
+        "docs": "/docs" if not _is_production else None,
         "health": "/health"
     }
 
@@ -105,9 +107,10 @@ async def startup_event():
         print(f"⚠️  Supabase: ✗ Not configured")
     
     # Check CORS
-    print(f"🌐 CORS: ✓ Enabled for all origins")
-    
-    print(f"\n📚 API Documentation: http://localhost:8000/docs")
+    print(f"🌐 CORS: ✓ Restricted to allowlisted origins")
+
+    if not _is_production:
+        print(f"\n📚 API Documentation: http://localhost:8000/docs")
     print(f"🏥 Health Check: http://localhost:8000/health")
     print(f"🌍 Root: http://localhost:8000/")
     print("=" * 60 + "\n")

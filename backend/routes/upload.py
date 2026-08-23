@@ -54,29 +54,36 @@ def get_supabase_client():
         return None
 
 def get_user_id_from_token(authorization: Optional[str]) -> Optional[str]:
-    """Extract user ID from authorization token"""
+    """Extract and verify user ID from authorization token.
+
+    Returns the real user id on success, or None if no token was supplied
+    or the token failed verification. Callers must NOT treat None as a
+    valid identity — a token that fails verification must never resolve
+    to any value that an ownership check treats as privileged.
+    """
     if not authorization:
         return None
-    
+
     try:
         token = authorization.replace("Bearer ", "").strip()
-        
+
         if not token:
             return None
-        
+
         supabase = get_supabase_client()
         if not supabase:
-            return "anonymous"
-        
+            print("⚠️  Cannot verify token: Supabase client unavailable")
+            return None
+
         user_response = supabase.auth.get_user(token)
         if user_response and hasattr(user_response, 'user') and user_response.user:
             return user_response.user.id
-        
-        return "anonymous"
-        
+
+        return None
+
     except Exception as e:
         print(f"⚠️  Token validation error: {e}")
-        return "anonymous"
+        return None
 
 def cleanup_temp_file(file_path: str):
     """Safely remove temporary file"""
@@ -137,7 +144,8 @@ async def upload_document(
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {str(e)}")
+            print(f"❌ Failed to save uploaded file: {e}")
+            raise HTTPException(status_code=500, detail="Failed to save uploaded file")
         
         file_size = os.path.getsize(file_path)
         
@@ -176,7 +184,8 @@ async def upload_document(
             documents = processor.process_file(file_path, file.filename)
         except Exception as e:
             cleanup_temp_file(file_path)
-            raise HTTPException(status_code=400, detail=f"Processing failed: {str(e)}")
+            print(f"❌ Processing failed: {e}")
+            raise HTTPException(status_code=400, detail="Failed to process document")
         
         if not documents:
             cleanup_temp_file(file_path)
@@ -202,7 +211,8 @@ async def upload_document(
                     supabase.table('documents').delete().eq('id', document_id).execute()
                 except:
                     pass
-            raise HTTPException(status_code=500, detail=f"Vector store error: {str(e)}")
+            print(f"❌ Vector store error: {e}")
+            raise HTTPException(status_code=500, detail="Failed to index document")
         
         # Update status
         if supabase and document_id:
@@ -231,7 +241,7 @@ async def upload_document(
             cleanup_temp_file(file_path)
         print(f"❌ Upload failed: {e}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Upload failed")
 
 @router.get("/documents/{user_id}")
 async def get_user_documents(
@@ -244,7 +254,7 @@ async def get_user_documents(
         if not requesting_user_id:
             raise HTTPException(status_code=401, detail="Authentication required")
         
-        if requesting_user_id != user_id and requesting_user_id != "anonymous":
+        if requesting_user_id != user_id:
             raise HTTPException(status_code=403, detail="Unauthorized")
         
         supabase = get_supabase_client()
@@ -260,7 +270,7 @@ async def get_user_documents(
         raise
     except Exception as e:
         print(f"❌ Error fetching documents: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch documents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch documents")
 
 @router.delete("/documents/{document_id}")
 async def delete_document(
@@ -281,7 +291,7 @@ async def delete_document(
         if not doc.data:
             raise HTTPException(status_code=404, detail="Document not found")
         
-        if doc.data['user_id'] != user_id and user_id != "anonymous":
+        if doc.data['user_id'] != user_id:
             raise HTTPException(status_code=403, detail="Unauthorized")
         
         supabase.table('documents').delete().eq('id', document_id).execute()
@@ -292,7 +302,7 @@ async def delete_document(
         raise
     except Exception as e:
         print(f"❌ Error deleting document: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete document")
 
 @router.options("/upload")
 async def upload_options():

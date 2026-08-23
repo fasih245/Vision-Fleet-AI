@@ -9,11 +9,14 @@ import Index from "./pages/Index";
 import Analytics from "./pages/Analytics";
 import Documents from "./pages/Documents";
 import Profile from "./pages/Profile";
+import History from "./pages/History";
+import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import supabase, { onAuthStateChange } from "./lib/supabase";
 import { Toaster } from "./components/ui/toaster";
 import { TooltipProvider } from "@radix-ui/react-tooltip";
+import { ThemeProvider } from "./hooks/use-theme";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +56,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
+    <ThemeProvider>
     <TooltipProvider>
       <Toaster />
       {/* <Sonner /> */}
@@ -94,12 +98,29 @@ const App = () => (
               </ProtectedRoute>
             }
           />
-          
+          <Route
+            path="/history"
+            element={
+              <ProtectedRoute>
+                <History />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <Settings />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Catch-all */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
+    </ThemeProvider>
   </QueryClientProvider>
 );
 
