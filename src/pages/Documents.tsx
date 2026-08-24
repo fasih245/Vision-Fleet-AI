@@ -73,25 +73,10 @@ const Documents = () => {
     setIsUploading(true);
 
     try {
-      // First, save document metadata to Supabase
-      const doc = await dbOperations.saveDocument(
-        file.name,
-        '', // Content will be processed
-        'file',
-        file.name,
-        file.size,
-        file.type
-      );
-
-      // Upload to backend (FAISS + processing)
+      // The backend owns document metadata end-to-end (create -> process ->
+      // update chunk count -> rollback on failure) — don't also insert a
+      // row here, or every upload creates two duplicate document rows.
       const response = await uploadDocument(file);
-
-      // Update document with processing results
-      await dbOperations.updateDocumentProcessing(
-        doc.id,
-        response.chunks_created,
-        true
-      );
 
       toast({
         title: "Upload successful",
@@ -352,26 +337,26 @@ const Documents = () => {
                       </Button>
                     </div>
                   </div>
-                  <CardTitle className="text-lg leading-tight">{doc.title}</CardTitle>
+                  <CardTitle className="text-lg leading-tight break-words">{doc.title}</CardTitle>
                 </CardHeader>
-                
+
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                    <div className="min-w-0">
                       <p className="text-muted-foreground">Size</p>
-                      <p className="font-medium">{formatFileSize(doc.file_size)}</p>
+                      <p className="font-medium break-words">{formatFileSize(doc.file_size)}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-muted-foreground">Chunks</p>
-                      <p className="font-medium">{doc.chunk_count || 0}</p>
+                      <p className="font-medium break-words">{doc.chunk_count || 0}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0 col-span-2">
                       <p className="text-muted-foreground">Type</p>
-                      <p className="font-medium">{doc.file_type || 'Unknown'}</p>
+                      <p className="font-medium break-all">{doc.file_type || 'Unknown'}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-muted-foreground">Uploaded</p>
-                      <p className="font-medium">
+                      <p className="font-medium break-words">
                         {new Date(doc.created_at).toLocaleDateString()}
                       </p>
                     </div>

@@ -140,22 +140,10 @@ export function AppSidebar({ currentConversationId, onConversationChange }: AppS
     setIsUploading(true);
 
     try {
-      const doc = await dbOperations.saveDocument(
-        file.name,
-        '',
-        'file',
-        file.name,
-        file.size,
-        file.type
-      );
-
+      // The backend owns document metadata end-to-end (create -> process ->
+      // update chunk count -> rollback on failure) — don't also insert a
+      // row here, or every upload creates two duplicate document rows.
       const response = await uploadDocument(file);
-
-      await dbOperations.updateDocumentProcessing(
-        doc.id,
-        response.chunks_created,
-        true
-      );
 
       toast({
         title: "Upload successful",

@@ -24,6 +24,13 @@ MAX_HISTORY_TOKENS = 1200
 MAX_HISTORY_MESSAGES_FETCH = 20
 HISTORY_SHRINK_THRESHOLD_TOKENS = 600
 
+# Pinecone returns cosine similarity — HIGHER means more relevant (opposite
+# direction from the old FAISS L2 distance, where lower meant closer).
+# Starting value, not empirically tuned yet — watch real query results and
+# adjust: too many irrelevant chunks getting through -> raise it; genuinely
+# relevant chunks getting filtered out -> lower it.
+RELEVANCE_SCORE_THRESHOLD = 0.3
+
 def get_services(user_id: str):
     """Initialize services lazily
     
@@ -265,13 +272,13 @@ async def chat(
         else:
             print(f"✓ Found {len(search_results)} total chunks")
 
-            # FILTER BY RELEVANCE
+            # FILTER BY RELEVANCE (cosine similarity — higher is better)
             relevant_results = [
                 (doc, score) for doc, score in search_results
-                if score < 1.8
+                if score > RELEVANCE_SCORE_THRESHOLD
             ]
 
-            print(f"✓ Filtered to {len(relevant_results)} relevant chunks (distance < 1.8)")
+            print(f"✓ Filtered to {len(relevant_results)} relevant chunks (similarity > {RELEVANCE_SCORE_THRESHOLD})")
 
             if len(relevant_results) == 0:
                 print("⚠️  No highly relevant chunks found after filtering")
