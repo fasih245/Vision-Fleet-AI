@@ -6,7 +6,13 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+
+# Env files (bare pattern matches at any depth, e.g. backend/.env too)
 .env
+.env.local
+.env.production
+.env.development
+
 node_modules
 dist
 dist-ssr
@@ -17,6 +23,7 @@ dist-ssr
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
@@ -26,9 +33,17 @@ dist-ssr
 # Local Netlify folder
 .netlify
 
-.env
-.env.local
-.env.production
-.env.development
-frontend/.env
-"backend/VectorRAG/" 
+# Backend — Python virtual environment (this project's venv is named
+# VisionFleetBackend; generic names included too as a safety net)
+backend/VisionFleetBackend/
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.so
+
+# Backend — generated/uploaded data (never commit these)
+backend/uploads/
+backend/*.pkl
+backend/*.bin
